@@ -9,9 +9,9 @@
 - **Done when:** `node server.ts` + `curl /api/learning` returns clean structured JSON mapping mission/plan/schema.
 
 ## Phase 2 — Background Process Bridge & Streaming RPC
-- [ ] `bridge.ts` spawns persistent `pi --mode rpc` (node:child_process)
-- [ ] `POST /api/chat` passes browser text to pi stdio
-- [ ] `GET /api/stream` (SSE) streams pi's character-by-character markdown
+- [x] `process-bridge.ts` spawns persistent `pi --mode rpc` (singleton, JSONL framing, respawn-on-crash)
+- [x] `POST /api/chat` writes a JSON-RPC `prompt` to the agent's stdin
+- [x] `GET /api/stream` (SSE) forwards JSONL lines + `[DONE]` on `agent_settled`
 - **Done when:** mock POST spins up the pi agent and streams its raw markdown dialogue.
 
 ## Phase 3 — Tufte-Style Dashboard Front-End
