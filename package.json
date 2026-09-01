@@ -1,0 +1,10 @@
+{
+  "name": "socrates-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.ts",
+    "test": "node --test learning-parser.test.ts"
+  }
+}

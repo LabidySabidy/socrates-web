@@ -1,0 +1,13 @@
+# Study data (runtime learning files — read-only, never committed)
+.agent/
+
+# Secrets / environment
+.env
+.env.*
+
+# Dependencies (zero-dep by design; kept for safety)
+node_modules/
+
+# OS metadata
+.DS_Store
+Thumbs.db
