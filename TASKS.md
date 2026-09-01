@@ -15,11 +15,11 @@
 - **Done when:** mock POST spins up the pi agent and streams its raw markdown dialogue.
 
 ## Phase 3 — Tufte-Style Dashboard Front-End
-- [ ] split-pane layout (dashboard right column)
-- [ ] MISSION ANCHOR module
-- [ ] COGNITIVE INDEX grid — click card → `/skill:grill-misconception [concept]`
-- [ ] SPACED REPETITION TIMELINE — due-today highlighted
-- [ ] MISCONCEPTION BOARD — open red, resolved gray
+- [x] split-pane layout (60% chat / 40% dashboard)
+- [x] MISSION ANCHOR module
+- [x] ACTIVE SYLLABUS — click card → `/skill:grill-misconception [concept]`
+- [x] SPACED REPETITION TIMELINE — due-today highlighted
+- [x] MISCONCEPTION BOARD — open red, resolved gray
 - **Done when:** mock data renders all four panels with correct typography + click interactions.
 
 ## Phase 4 — Socratic Chat Interface & Hot-Reloading Watcher
