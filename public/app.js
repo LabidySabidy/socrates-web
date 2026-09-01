@@ -1,6 +1,7 @@
 // app.js — Socrates-Web frontend controller.
-// Renders the /api/learning JSON into the four dashboard modules and drives
-// the chat column by POSTing /api/chat then consuming the /api/stream SSE.
+// Renders /api/learning into the four dashboard modules, drives the chat column
+// via POST /api/chat + /api/stream SSE, and hot-updates the dashboard on
+// {type:"reload"} events pushed by the server's file watcher.
 
 const stream = document.getElementById("stream");
 const input = document.getElementById("input");
@@ -23,19 +24,23 @@ function scrollBottom() {
 function setBusy(b) {
   busy = b;
   sendBtn.disabled = b;
+  input.disabled = b;
 }
 
 // ---- dashboard ------------------------------------------------------------
+
+function renderDashboard(data) {
+  renderMission(data.mission);
+  renderConcepts(data.schema.concepts);
+  renderTimeline(data.schema.concepts);
+  renderMisconceptions(data.schema.misconceptions);
+}
 
 async function loadDashboard() {
   try {
     const res = await fetch("/api/learning");
     if (!res.ok) return;
-    const data = await res.json();
-    renderMission(data.mission);
-    renderConcepts(data.schema.concepts);
-    renderTimeline(data.schema.concepts);
-    renderMisconceptions(data.schema.misconceptions);
+    renderDashboard(await res.json());
   } catch {
     /* server not ready yet */
   }
@@ -149,11 +154,13 @@ function openStream() {
 
   es.onmessage = (ev) => {
     const raw = ev.data;
+
     if (raw === "[DONE]") {
       es.close();
       if (currentES === es) currentES = null;
       setBusy(false);
-      loadDashboard(); // refresh badges/schedule after the turn
+      loadDashboard();
+      input.focus();
       return;
     }
     if (raw.startsWith("[ERROR]")) {
@@ -161,14 +168,23 @@ function openStream() {
       es.close();
       if (currentES === es) currentES = null;
       setBusy(false);
+      input.focus();
       return;
     }
+
     let e;
     try {
       e = JSON.parse(raw);
     } catch {
       return;
     }
+
+    // hot-reload push from the server's file watcher
+    if (e.type === "reload") {
+      renderDashboard(e.data);
+      return;
+    }
+
     if (e.type === "message_update" && e.assistantMessageEvent) {
       const d = e.assistantMessageEvent;
       if (d.type === "thinking_delta") {

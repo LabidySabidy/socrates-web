@@ -10,6 +10,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseLearning } from "./learning-parser.ts";
@@ -48,6 +49,8 @@ function finalize(kind: "done" | "error", detail?: unknown): void {
 }
 
 bridge.onLine((line) => {
+  // Ignore tail-end stdout emitted after the turn already settled.
+  if (settled) return;
   turnLines.push(line);
   const res = activeStream;
   if (res) {
@@ -66,6 +69,7 @@ bridge.onLine((line) => {
   }
 
   if (evt?.type === "agent_settled") {
+    bridge.markIdle();
     finalize("done");
   } else if (
     evt?.type === "response" &&
@@ -79,6 +83,38 @@ bridge.onLine((line) => {
 bridge.onExit(() => {
   if (!settled) finalize("error", "pi process exited");
 });
+
+// --- debounced file watcher ------------------------------------------------
+// Re-parses SCHEMA.md after 150ms of silence and pushes a {type:"reload"} event
+// to the active SSE stream so the dashboard hot-updates without a page reload.
+let watcher: FSWatcher | null = null;
+let watchTimer: NodeJS.Timeout | null = null;
+
+function startWatcher(): void {
+  const dir = join(projectDir, ".agent", "learning");
+  if (!existsSync(dir)) {
+    console.log("[watcher] no .agent/learning dir — hot-reload disabled");
+    return;
+  }
+  watcher = watch(dir, (_eventType, filename) => {
+    if (filename && filename !== "SCHEMA.md") return;
+    if (watchTimer) clearTimeout(watchTimer);
+    watchTimer = setTimeout(() => {
+      console.log("[watcher] SCHEMA.md changed — re-parsing (150ms debounce)");
+      const data = parseLearning(projectDir);
+      if (activeStream) {
+        try {
+          activeStream.write(`data: ${JSON.stringify({ type: "reload", data })}\n\n`);
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 150);
+  });
+  console.log(`[watcher] watching ${dir}`);
+}
+
+startWatcher();
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -207,6 +243,8 @@ server.listen(PORT, () => {
 });
 
 function shutdown() {
+  if (watchTimer) clearTimeout(watchTimer);
+  watcher?.close();
   bridge.kill();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1000).unref();

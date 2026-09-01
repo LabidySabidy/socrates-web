@@ -24,6 +24,7 @@ export class ProcessBridge {
   private readonly lineHandlers = new Set<LineHandler>();
   private readonly exitHandlers = new Set<ExitHandler>();
   private shuttingDown = false;
+  private busy = false;
 
   constructor(cwd: string) {
     this.cwd = cwd;
@@ -34,6 +35,15 @@ export class ProcessBridge {
 
   get pid(): number | undefined {
     return this.child?.pid;
+  }
+
+  get isBusy(): boolean {
+    return this.busy;
+  }
+
+  /** Called by the server when agent_settled is observed. */
+  markIdle(): void {
+    this.busy = false;
   }
 
   onLine(handler: LineHandler): void {
@@ -50,6 +60,8 @@ export class ProcessBridge {
     this.ensureSpawned();
     const child = this.child;
     if (!child || !child.stdin.writable) return false;
+    const obj = command as { type?: string } | null;
+    if (obj && obj.type === "prompt") this.busy = true;
     child.stdin.write(JSON.stringify(command) + "\n");
     return true;
   }
@@ -89,6 +101,7 @@ export class ProcessBridge {
         `[process-bridge] pi exited code=${code} signal=${signal ?? "none"} — re-spawn on next input`,
       );
       this.child = null;
+      this.busy = false;
       for (const h of this.exitHandlers) {
         try {
           h(code, signal);

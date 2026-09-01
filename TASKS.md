@@ -23,9 +23,9 @@
 - **Done when:** mock data renders all four panels with correct typography + click interactions.
 
 ## Phase 4 — Socratic Chat Interface & Hot-Reloading Watcher
-- [ ] serif chat stream (left column)
-- [ ] `node:fs` watcher on `.agent/learning/`
-- [ ] SSE push on SCHEMA.md change → badges update without reload
+- [x] serif chat stream (left column) with POST/stream pipeline
+- [x] `node:fs` watcher on `.agent/learning/` (150ms debounce) → `{type:"reload"}` SSE push
+- [x] SSE push on SCHEMA.md change → badges update without reload
 - **Done when:** type in chat → pi streams → dashboard badge elevates on schema change.
 
 ## Phase 5 — Timer Rest Gates, Passivity Intercepts, Budapest Mode
