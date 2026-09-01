@@ -72,6 +72,33 @@ test("parseSchema extracts concepts, badges, sm2, due, misconceptions", () => {
   assert.equal(s.misconceptions[1].status, "open");
 });
 
+test("parsePlan preserves an empty 'why' column without shifting", () => {
+  const p = parsePlan(`
+## 20-Hour Deconstruction
+| # | Sub-skill | Why it matters | Hours |
+|---|-----------|----------------|-------|
+| 2 | Fiber | | 5 |
+`);
+  assert.equal(p.sequence.length, 1);
+  assert.equal(p.sequence[0].skill, "Fiber");
+  assert.equal(p.sequence[0].why, "");
+  assert.equal(p.sequence[0].hours, "5");
+});
+
+test("parseSchema preserves an empty 'corrected' column without shifting", () => {
+  const s = parseSchema(`
+## 3. Misconception Registry
+| MIS-002 | lifecycle | believed Y | | open | 2026-02-01 |
+`);
+  assert.equal(s.misconceptions.length, 1);
+  assert.equal(s.misconceptions[0].id, "MIS-002");
+  assert.equal(s.misconceptions[0].concept, "lifecycle");
+  assert.equal(s.misconceptions[0].misconception, "believed Y");
+  assert.equal(s.misconceptions[0].corrected, "");
+  assert.equal(s.misconceptions[0].status, "open");
+  assert.equal(s.misconceptions[0].date, "2026-02-01");
+});
+
 test("parseLearning reads a real directory", () => {
   const d = parseLearning("C:/Users/Kasim Alam/.pi/agent/learning-demo");
   assert.ok(d.present.includes("SCHEMA.md"));

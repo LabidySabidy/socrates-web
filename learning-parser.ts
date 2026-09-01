@@ -98,6 +98,18 @@ function dueOf(nextReview: string): "due" | "upcoming" | "unscheduled" {
   return nextReview <= isoToday() ? "due" : "upcoming";
 }
 
+/**
+ * Split a markdown table row into cells, preserving empty middle cells.
+ * Drops only the two structural empties produced by the leading and trailing
+ * pipe characters — never .filter(Boolean), which shifts columns left.
+ */
+function parseMarkdownRow(line: string): string[] {
+  const cells = line.split("|").map((s) => s.trim());
+  if (cells[0] === "") cells.shift();
+  if (cells[cells.length - 1] === "") cells.pop();
+  return cells;
+}
+
 export function parseMission(text: string): Mission {
   const grab = (label: string): string => {
     const marker = `**${label}**`;
@@ -119,7 +131,7 @@ export function parsePlan(text: string): Plan {
   for (const line of text.split("\n")) {
     const t = line.trim();
     if (/^\|\s*\d+\s*\|/.test(t)) {
-      const cells = t.split("|").map((s) => s.trim()).filter(Boolean);
+      const cells = parseMarkdownRow(t);
       if (cells.length >= 2) {
         sequence.push({
           n: sequence.length + 1,
@@ -148,8 +160,8 @@ export function parseSchema(text: string): {
   concepts: Concept[];
   misconceptions: Misconception[];
 } {
-  // emoji as alternation, never a [] class (surrogate pairs)
-  const headingRe = /^### ((?:⬜|🟥|🟨|🟩|🟦)) (.+)$/gm;
+  // emoji as alternation, never a [] class (surrogate pairs); /u = unicode-safe
+  const headingRe = /^### ((?:⬜|🟥|🟨|🟩|🟦)) (.+)$/gmu;
   const matches: { badge: string; name: string; index: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = headingRe.exec(text)) !== null) {
@@ -186,7 +198,7 @@ export function parseSchema(text: string): {
   for (const line of text.split("\n")) {
     const t = line.trim();
     if (!/^\| MIS-\d+ \|/.test(t)) continue;
-    const cells = t.split("|").map((s) => s.trim()).filter(Boolean);
+    const cells = parseMarkdownRow(t);
     if (cells.length >= 5) {
       misconceptions.push({
         id: cells[0],
