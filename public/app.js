@@ -1,14 +1,28 @@
 // app.js — Socrates-Web frontend controller.
-// Renders /api/learning into the four dashboard modules, drives the chat column
-// via POST /api/chat + /api/stream SSE, and hot-updates the dashboard on
-// {type:"reload"} events pushed by the server's file watcher.
+// Dashboard rendering, chat (POST /api/chat + /api/stream SSE), hot-reload,
+// and Phase 5 guardrails: rest gate, passivity banner, Budapest mode.
 
 const stream = document.getElementById("stream");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
+const budapest = document.getElementById("budapest");
+const passivityEl = document.getElementById("passivity");
+const overlay = document.getElementById("overlay");
+const countdownEl = document.getElementById("countdown");
 
 let currentES = null;
 let busy = false;
+let restTimer = null;
+
+const BUDAPEST_MODIFIER =
+  "[BUDAPEST MODE ACTIVE] Forbid lecturing, definitions, or syntax explanations. " +
+  "Place a difficult, counter-intuitive programming problem or logical paradox in front of the user. " +
+  "Force them to struggle and attempt a solution before revealing any documentation.";
+
+const PASSIVE_RE =
+  /^(?:ok|okay|k+|cool|got ?it|makes? ?sense|next|proceed|continue|go ?on|y|yes|yeah|sure|fine|right|nice|great|\.+)$/i;
+
+const GATE_TOKENS = ["COGNITIVE SPRINT GATE", "SPRINT_GATE", "SPRINT GATE"];
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -107,6 +121,48 @@ function renderMisconceptions(list) {
   }
 }
 
+// ---- guardrails -----------------------------------------------------------
+
+function hasGateToken(s) {
+  return GATE_TOKENS.some((t) => s.includes(t));
+}
+
+function triggerRestGate() {
+  setBusy(true);
+  overlay.classList.remove("hidden");
+  overlay.classList.remove("fading");
+  let remaining = 5 * 60;
+  const tick = () => {
+    const m = String(Math.floor(remaining / 60)).padStart(2, "0");
+    const s = String(remaining % 60).padStart(2, "0");
+    countdownEl.textContent = m + ":" + s;
+    if (remaining <= 0) {
+      if (restTimer) clearInterval(restTimer);
+      restTimer = null;
+      overlay.classList.add("fading");
+      setTimeout(() => overlay.classList.add("hidden"), 500);
+      setBusy(false);
+      input.focus();
+      return;
+    }
+    remaining--;
+  };
+  tick();
+  restTimer = setInterval(tick, 1000);
+}
+
+function showPassivity() {
+  passivityEl.classList.add("visible");
+}
+
+function hidePassivity() {
+  passivityEl.classList.remove("visible");
+}
+
+function isPassiveText(t) {
+  return PASSIVE_RE.test(t.trim());
+}
+
 // ---- chat -----------------------------------------------------------------
 
 function append(kind, text) {
@@ -120,16 +176,19 @@ async function chat(message) {
   if (busy) return;
   message = (message || "").trim();
   if (!message) return;
+  if (!isPassiveText(message)) hidePassivity();
   setBusy(true);
   append("user", message);
   input.value = "";
+
+  const payload = budapest.checked ? message + "\n\n" + BUDAPEST_MODIFIER : message;
 
   let res;
   try {
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message: payload }),
     });
   } catch {
     append("meta", "⚠️ could not reach server");
@@ -151,6 +210,7 @@ function openStream() {
   currentES = es;
   let textEl = null;
   let thinkEl = null;
+  let gateActive = false;
 
   es.onmessage = (ev) => {
     const raw = ev.data;
@@ -179,9 +239,16 @@ function openStream() {
       return;
     }
 
-    // hot-reload push from the server's file watcher
     if (e.type === "reload") {
       renderDashboard(e.data);
+      return;
+    }
+
+    // fire-and-forget extension notifications (e.g. passivity-interceptor)
+    if (e.type === "extension_ui_request") {
+      if (e.method === "notify" && typeof e.message === "string" && e.message.includes("PASSIVITY")) {
+        showPassivity();
+      }
       return;
     }
 
@@ -195,6 +262,12 @@ function openStream() {
         thinkEl.textContent += d.delta;
         scrollBottom();
       } else if (d.type === "text_delta") {
+        if (gateActive) return; // suppress the rest of the gate markdown
+        if (hasGateToken(d.delta)) {
+          gateActive = true;
+          triggerRestGate();
+          return;
+        }
         if (!textEl) {
           textEl = el("div", "msg assistant");
           stream.appendChild(textEl);

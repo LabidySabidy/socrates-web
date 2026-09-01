@@ -29,7 +29,7 @@
 - **Done when:** type in chat → pi streams → dashboard badge elevates on schema change.
 
 ## Phase 5 — Timer Rest Gates, Passivity Intercepts, Budapest Mode
-- [ ] SPRINT_GATE signal → freeze chat input + 5-min countdown modal
-- [ ] PASSIVITY INTERCEPT → warning banner
-- [ ] BUDAPEST MODE toggle → prepend no-lecture prompt to outbound inputs
+- [x] SPRINT_GATE signal → freeze chat input + 5-min countdown modal
+- [x] PASSIVITY INTERCEPT → warning banner
+- [x] BUDAPEST MODE toggle → prepend no-lecture prompt to outbound inputs
 - **Done when:** simulated session proves all three guardrails fire.
