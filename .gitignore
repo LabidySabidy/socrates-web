@@ -5,7 +5,7 @@
 .env
 .env.*
 
-# Dependencies (zero-dep by design; kept for safety)
+# Dependencies (reproducible via package-lock.json; run `npm install`)
 node_modules/
 
 # OS metadata

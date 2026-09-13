@@ -6,10 +6,30 @@
  * (manual StringDecoder buffer) — NOT node:readline, which the pi RPC docs
  * explicitly flag as non-compliant (it splits U+2028/U+2029 inside JSON strings).
  *
- * Env overrides (for tests): PI_BIN (default "pi"), PI_ARGS (default "--mode rpc").
+ * Spawns the bundled `pi` (declared npm dependency) via the current node runtime.
+ * Env overrides (tests): PI_BIN + PI_ARGS — e.g. `PI_BIN=node PI_ARGS=test/mock-pi.mjs`.
  */
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
+
+function resolvePiCli(): string {
+  // The pi package is ESM-only — its `exports` map has no "require" condition,
+  // so require.resolve() throws ERR_PACKAGE_PATH_NOT_EXPORTED. import.meta.resolve
+  // honors the "import" condition. Resolve the main entry, walk to the package
+  // root, then honor the declared bin.pi path.
+  const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  const root = dirname(dirname(fileURLToPath(entry))); // <root>/dist/index.js → <root>
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    bin?: { pi?: string };
+  };
+  if (!pkg.bin?.pi) {
+    throw new Error("@earendil-works/pi-coding-agent declares no bin.pi");
+  }
+  return join(root, pkg.bin.pi);
+}
 
 export type LineHandler = (line: string) => void;
 export type ExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void;
@@ -19,6 +39,7 @@ export class ProcessBridge {
   private readonly bin: string;
   private readonly args: string[];
   private readonly cwd: string;
+  private cliPath: string | null = null;
   private buffer = "";
   private readonly decoder = new StringDecoder("utf8");
   private readonly lineHandlers = new Set<LineHandler>();
@@ -28,8 +49,11 @@ export class ProcessBridge {
 
   constructor(cwd: string) {
     this.cwd = cwd;
-    this.bin = process.env.PI_BIN ?? "pi";
-    this.args = (process.env.PI_ARGS ?? "--mode rpc").split(/\s+/).filter(Boolean);
+    // Default runtime: the current node process running the bundled pi CLI
+    // (declared dependency). PI_BIN/PI_ARGS remain escape hatches — e.g. tests
+    // set PI_BIN=node and PI_ARGS=test/mock-pi.mjs to bypass the real agent.
+    this.bin = process.env.PI_BIN ?? process.execPath;
+    this.args = (process.env.PI_ARGS ?? "").split(/\s+/).filter(Boolean);
     process.on("exit", () => this.kill());
   }
 
@@ -71,17 +95,28 @@ export class ProcessBridge {
     this.spawn();
   }
 
+  private buildArgs(): string[] {
+    if (this.args.length) return this.args; // explicit PI_ARGS override (tests)
+    if (this.cliPath === null) this.cliPath = resolvePiCli();
+    return [this.cliPath, "--mode", "rpc"];
+  }
+
   private spawn(): void {
-    // Windows: `pi` is a .cmd shim, so it must run under a shell. When PI_BIN is
-    // an explicit executable (e.g. `node` in tests), skip the shell.
-    const useShell = process.platform === "win32" && !process.env.PI_BIN;
-    const child: ChildProcessWithoutNullStreams = useShell
-      ? spawn([this.bin, ...this.args].join(" "), {
-          cwd: this.cwd,
-          shell: true,
-          windowsHide: true,
-        })
-      : spawn(this.bin, this.args, { cwd: this.cwd, windowsHide: true });
+    let args: string[];
+    try {
+      args = this.buildArgs();
+    } catch (err) {
+      console.error(
+        `[process-bridge] cannot locate bundled pi: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return; // child stays null; the next send() retries and reports not-accepted
+    }
+    // Spawn the node runtime directly (never a .cmd shim), so no shell wrapper
+    // and no orphaned cmd.exe can survive on Windows.
+    const child: ChildProcessWithoutNullStreams = spawn(this.bin, args, {
+      cwd: this.cwd,
+      windowsHide: true,
+    });
     this.child = child;
 
     child.stdout.on("data", (chunk: Buffer) => this.onStdout(chunk));

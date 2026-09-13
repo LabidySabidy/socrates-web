@@ -1,10 +1,10 @@
 # Plan — Socrates-Web (standalone zero-dependency learning platform)
 
 ## Goal
-A browser-based split-pane Socratic learning platform that reads `.agent/learning/` markdown and drives a background `pi --mode rpc` agent — with zero third-party dependencies, isolated from pi-web.
+A browser-based split-pane Socratic learning platform that reads `.agent/learning/` markdown and drives a background `pi --mode rpc` agent — isolated from pi-web. The `pi` agent ships as a bundled npm dependency so anyone can clone + `npm install` + run.
 
 ## Approach
-Build in `F:\Development\socrates-web` using only Node built-ins (`node:http`, `node:fs`, `node:child_process`). A single Node process serves both the JSON API and the static dashboard, parses `MISSION.md`/`PLAN.md`/`SCHEMA.md` locally, and bridges browser chat to a persistent `pi --mode rpc` subprocess. TypeScript runs via Node 24 native type-stripping (no build step, no deps).
+Build in `F:\Development\socrates-web` using Node built-ins (`node:http`, `node:fs`, `node:child_process`) plus one bundled dependency (`@earendil-works/pi-coding-agent`, which supplies the `pi` agent). A single Node process serves both the JSON API and the static dashboard, parses `MISSION.md`/`PLAN.md`/`SCHEMA.md` locally, and bridges browser chat to a persistent `pi --mode rpc` subprocess. TypeScript runs via Node 24 native type-stripping (no build step).
 
 ## Phases
 1. **Standalone server + parser** — `learning-parser.ts` + `GET /api/learning` structured JSON.
@@ -31,10 +31,10 @@ Build in `F:\Development\socrates-web` using only Node built-ins (`node:http`, `
 - [ ] Sprint gate, passivity intercept, and Budapest toggle all fire in a simulated session.
 
 ## Not in scope
-- Authentication, multi-user, any third-party npm dependency.
+- Authentication, multi-user.
 - Writing/mutating the learning markdown (read-only dashboard; writes stay in the Socratic skills/extensions).
 
-## Open questions
-- Default target project dir: `cwd` vs `PROJECT_DIR` env (leaning: `PROJECT_DIR`, fallback `cwd`).
-- Port: defaulting `3850` (configurable via `PORT`).
-- git init + remote for socrates-web (deferred until after Phase 1 approval).
+## Settled (formerly open questions)
+- Target project dir: `PROJECT_DIR` env is **required** — points at the dir containing `.agent/learning/`. Falls back to `cwd` (which yields an empty dashboard if run from socrates-web itself).
+- Port: `3850` default (override via `PORT`). The old 3847 log line was the pre-rename "study-dashboard" build.
+- git: initialized with remote `github.com/LabidySabidy/socrates-web.git`.
