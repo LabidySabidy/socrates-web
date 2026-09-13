@@ -8,12 +8,16 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  MISTAKE_LIMIT,
+  awardedBadge,
+  badgeState,
   buildGenerationPrompt,
   cachePath,
   checkCite,
   courseOracle,
   extractItems,
   parseCite,
+  raisesBadge,
   readCache,
   validateItem,
   validateItems,
@@ -37,6 +41,46 @@ function tmp(t: { after(fn: () => void): void }): string {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+// ---------------------------------------------------------------------------
+// attempt -> mastery mapping (T-043)
+// ---------------------------------------------------------------------------
+
+test("the gate's own rule: under two mistakes reaches Proficient, two forfeits it", () => {
+  assert.equal(awardedBadge(3, 0), "🟩");
+  assert.equal(awardedBadge(3, 1), "🟩", "one mistake still leaves Proficient reachable");
+  assert.equal(awardedBadge(2, 2), "🟨", "the gate closes at two");
+  assert.equal(awardedBadge(0, 5), "🟨");
+});
+
+test("an attempt never awards Mastered — nothing licenses a quiz to top the scale", () => {
+  for (const wrong of [0, 1, 2, 9]) {
+    assert.notEqual(awardedBadge(10, wrong), "🟦");
+  }
+});
+
+test("the mapping mirrors the quiz UI's MISTAKE_LIMIT", () => {
+  // If the gate fires at a different count than the rule, the completion copy and the gate copy
+  // would contradict each other in the same session.
+  assert.equal(MISTAKE_LIMIT, 2);
+});
+
+test("badges only ever raise", () => {
+  assert.equal(raisesBadge("⬜", "🟨"), true);
+  assert.equal(raisesBadge("🟨", "🟩"), true);
+  assert.equal(raisesBadge("🟩", "🟩"), false, "an equal award is not a raise");
+  assert.equal(raisesBadge("🟩", "🟨"), false, "an attempt never lowers a badge");
+  assert.equal(raisesBadge("🟦", "🟩"), false, "nor does it demote a mastered concept");
+  assert.equal(raisesBadge(undefined, "🟨"), true, "an unmeasured concept can be raised");
+  assert.equal(raisesBadge("⬜", "🟦"), true, "the ladder is ordered, not a set");
+});
+
+test("badgeState names the five states and nothing else", () => {
+  assert.equal(badgeState("🟩"), "Proficient");
+  assert.equal(badgeState("🟨"), "Familiar");
+  assert.equal(badgeState("⬜"), "Not started");
+  assert.equal(badgeState("?"), "Not started", "an unknown badge reads as not started");
+});
 
 // ---------------------------------------------------------------------------
 // citations

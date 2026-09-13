@@ -275,10 +275,21 @@
       wrong-but-well-cited generated item passes. Not solved, and not claimed to be — the mitigation shipped is
       that every quiz item shows its provenance (`authored` / `generated` / `cached`) and its citations. A
       future option is a second pass that checks the answer against the cited artifact.
-- [ ] **T-043** No projection consumes `assessment_result` yet, so a quiz attempt is recorded history that
-      changes nothing. Wiring it into a mastery projection is a deliberate future step; until then the
-      completion screen must not imply one. **Guard:** `completionView` renders a mastery line only when the
-      response carries a mastery value, and that is tested.
+- [x] **T-043** Close the assessment loop: an attempt moves the concept's badge.
+      **Done** — the mapping is DERIVED, not invented: the only statement of a quiz-to-mastery relationship in
+      this project is the design's mastery-gate copy ("You can no longer reach 'Proficient' on this attempt…
+      after two mistakes"), so fewer than two mistakes qualifies the concept for **Proficient** and two or more
+      qualifies it for **Familiar**. Four constraints, each documented in `docs/CONTENT-MODEL.md`: it never
+      awards Mastered, it is raise-only, it applies only when a unit maps to exactly one concept, and it writes
+      a `badge` EVENT rather than the file — socrates-web does not run the extension's projection, so the
+      extension applies it on that course's next session.
+      **Verified end-to-end:** a clean attempt returned `mastery: null` + `pendingBadge {alpha-one, 🟩,
+      Proficient}`, appended `assessment_result` then `badge` to the log, left `SCHEMA.md` at `### 🟨 alpha-one`,
+      and after one `pi -p` session in that course the file read `### 🟩 alpha-one` and the API reported
+      `Proficient #2d7a4c ring 0.78`. Six mapping tests plus four route tests.
+      **SM-2 deliberately untouched:** an interval is a function of the previous interval and ease factor, and no
+      such rule for a quiz attempt is defined anywhere in this project — inventing one would be a fabricated
+      scheduling rule. The tutor's telemetry owns those fields.
 - [ ] **T-041** A "start a course" affordance. A not-initiated directory can only be fixed by authoring
       `MISSION.md` by hand — there is no UI path and no scaffold flow in the app. Acceptable while the
       catalogue is small; revisit as it grows. The scaffold skill already knows how to write the three files,

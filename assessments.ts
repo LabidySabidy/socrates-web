@@ -57,6 +57,52 @@ export const WARN = {
 export type ValidateResult = { ok: true; item: AssessmentItem } | { ok: false; error: string };
 
 // ---------------------------------------------------------------------------
+// The attempt -> mastery mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Mistakes in one attempt before the design's mastery gate closes.
+ * Mirrors `MISTAKE_LIMIT` in web/src/quiz.ts — the gate and this rule must agree.
+ */
+export const MISTAKE_LIMIT = 2;
+
+/** The badge ladder, worst to best. Raising only ever moves right. */
+const LADDER = ["⬜", "🟥", "🟨", "🟩", "🟦"] as const;
+
+/**
+ * What a completed attempt QUALIFIES the concept for.
+ *
+ * This rule is not invented. The only statement of a quiz-to-mastery relationship anywhere in this
+ * project is the design's mastery-gate copy: "You can no longer reach 'Proficient' on this attempt.
+ * You can keep going or start over. Start over is available after two mistakes."
+ *
+ * That says exactly two things, and this function says only those two:
+ *   - fewer than two mistakes leaves Proficient reachable for the attempt;
+ *   - two or more forfeits Proficient for that attempt, so the attempt tops out at Familiar.
+ *
+ * It deliberately says nothing about Mastered. A quiz is weaker evidence than a tutor's judgement,
+ * and nothing in the project licenses an attempt to award the top of the scale.
+ */
+export function awardedBadge(right: number, wrong: number): "🟩" | "🟨" {
+  void right;
+  return wrong < MISTAKE_LIMIT ? "🟩" : "🟨";
+}
+
+export function badgeState(badge: string): string {
+  return (
+    { "⬜": "Not started", "🟥": "Attempted", "🟨": "Familiar", "🟩": "Proficient", "🟦": "Mastered" }[badge] ??
+    "Not started"
+  );
+}
+
+/** True only when the award moves the concept UP. An attempt never lowers a badge. */
+export function raisesBadge(current: string | undefined, awarded: string): boolean {
+  const from = LADDER.indexOf((current ?? "⬜") as (typeof LADDER)[number]);
+  const to = LADDER.indexOf(awarded as (typeof LADDER)[number]);
+  return from !== -1 && to !== -1 && to > from;
+}
+
+// ---------------------------------------------------------------------------
 // Citation checking
 // ---------------------------------------------------------------------------
 

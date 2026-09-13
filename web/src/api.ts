@@ -97,8 +97,10 @@ export interface ResultResponse {
   right?: number;
   wrong?: number;
   total?: number;
-  /** Always null today: no projection computes a mastery change from an attempt. */
+  /** Always null: socrates-web does not run the extension's projection, so the FILE has not moved. */
   mastery?: string | null;
+  /** A badge the attempt earned and logged, awaiting the tutor's projection. */
+  pendingBadge?: { concept: string; badge: string; state: string } | null;
   error?: string;
 }
 

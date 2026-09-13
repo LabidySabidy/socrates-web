@@ -108,6 +108,41 @@ invent a mastery value. A manifest unit referencing nothing real reads Not start
 
 Any other type string in a manifest is rejected with `unknown module type: <type>`.
 
+## An attempt → mastery mapping (T-043)
+
+The only statement of a quiz-to-mastery relationship anywhere in this project is the design
+reference's mastery-gate copy:
+
+> "You can no longer reach 'Proficient' on this attempt. You can keep going or start over. Start over
+> is available after two mistakes."
+
+So the rule says exactly what that says, and nothing more (`awardedBadge` in `assessments.ts`):
+
+| Attempt | Qualifies the concept for |
+|---|---|
+| fewer than two mistakes | **Proficient** (`🟩`) |
+| two or more mistakes | **Familiar** (`🟨`) |
+
+Four constraints, each deliberate:
+
+1. **It never awards Mastered.** A quiz is weaker evidence than a tutor's judgement, and nothing in
+   this project licenses an attempt to award the top of the five-state scale.
+2. **It is raise-only** (`raisesBadge`). An attempt never lowers a badge it finds.
+3. **It only applies when the unit maps to exactly one concept.** The derived model is one unit per
+   concept card; an authored unit that references several concepts has no single badge to move.
+4. **It writes a `badge` event, not the file.** socrates-web does not run the extension's projection,
+   so it logs the award in the extension's own vocabulary and the extension's existing projection
+   applies it. That happens on that course's next tutor session.
+
+Because of (4), `POST /api/courses/:id/results` returns `mastery: null` — the file has not moved —
+plus `pendingBadge: { concept, badge, state }`. The completion screen reports the qualification and
+the deferral: *"This attempt qualifies <concept> for Proficient. The badge updates the next time a
+tutor session runs in this course."* It never claims a badge moved.
+
+**SM-2 is deliberately untouched.** An SM-2 interval is a function of the previous interval and ease
+factor, and no such rule is defined anywhere in this project for a quiz attempt — the tutor's
+telemetry owns those fields. Inventing one here would be a fabricated scheduling rule.
+
 ## Discovery — scan first, registry overlay
 
 1. **Scan** `COURSES_ROOT` (default: the parent of `PROJECT_DIR`) **one level deep** for

@@ -109,6 +109,7 @@ export function QuizPage({
             total: state.count,
             recorded: res.recorded === true,
             mastery: res.mastery,
+            pendingBadge: res.pendingBadge ?? null,
             recordError: res.recorded ? null : (res.error ?? "unknown error"),
           }),
         );
@@ -257,6 +258,7 @@ export function QuizPage({
           {view.masteryLine ? <p className="reading quiz-mastery">{view.masteryLine}</p> : null}
           <p className="reading">{view.scoreLine}</p>
           {view.recordedLine ? <p className="reading quiz-recorded">{view.recordedLine}</p> : null}
+          {view.pendingLine ? <p className="reading quiz-pending">{view.pendingLine}</p> : null}
           <div className="quiz-actions">
             <button type="button" className="primary" onClick={() => setState(restart(state))}>
               Start over

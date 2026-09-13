@@ -38,9 +38,12 @@ import {
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import {
+  awardedBadge,
+  badgeState,
   buildGenerationPrompt,
   courseOracle,
   extractItems,
+  raisesBadge,
   readCache,
   validateItems,
   writeCache,
@@ -792,9 +795,50 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             : [],
         });
 
-        // `mastery` is deliberately null: no projection computes a mastery change from an attempt,
-        // so the client has no field to render a claim from. It appears here only when one exists.
-        sendJson(res, 200, { recorded: true, unit, right, wrong, total, mastery: null });
+        // The attempt QUALIFIES the concept for a badge (rule in assessments.ts, derived from the
+        // design's mastery-gate copy) and that award is logged as a `badge` event — the extension's
+        // own vocabulary, so its existing projection applies it on its next run.
+        //
+        // `mastery` stays null because the FILE has not moved yet: socrates-web does not run the
+        // extension's projection, and claiming a badge the file does not show is the exact class of
+        // unsupported claim this project keeps removing. `pendingBadge` reports the qualification
+        // and the deferral instead.
+        let pendingBadge: { concept: string; badge: string; state: string } | null = null;
+        try {
+          const tree = loadCourseTree(ref, readText);
+          const unitTree = tree.units.find((u) => u.n === unit);
+          const concept = unitTree?.concepts.length === 1 ? unitTree.concepts[0] : null;
+          if (concept) {
+            const current = parseLearning(ref.dir).schema.concepts.find((c) => c.name === concept)?.badge;
+            const award = awardedBadge(right, wrong);
+            if (raisesBadge(current, award)) {
+              appendEvent(ref.dir, {
+                v: 1,
+                ts: new Date().toISOString(),
+                kind: "badge",
+                cwd: ref.dir,
+                concept,
+                to: award,
+                status: award,
+                // Not "tool" or "tag": this badge came from an attempt, not from the tutor.
+                source: "assessment",
+              });
+              pendingBadge = { concept, badge: award, state: badgeState(award) };
+            }
+          }
+        } catch (err) {
+          console.warn(`[results] mastery evaluation skipped: ${err instanceof Error ? err.message : err}`);
+        }
+
+        sendJson(res, 200, {
+          recorded: true,
+          unit,
+          right,
+          wrong,
+          total,
+          mastery: null,
+          pendingBadge,
+        });
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
       }

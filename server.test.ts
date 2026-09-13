@@ -521,8 +521,8 @@ test("a completed attempt is appended to the course log, and claims no mastery",
   assert.equal(body.total, 3);
   assert.equal(body.mastery, null, "nothing computes a mastery change, so nothing is claimed");
 
-  const line = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10)).at(-1)!;
-  const event = JSON.parse(line);
+  const lines = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10));
+  const event = lines.map((l) => JSON.parse(l)).find((e) => e.kind === "assessment_result")!;
   assert.equal(event.kind, "assessment_result");
   assert.equal(event.v, 1);
   assert.equal(event.unit, 1);
@@ -548,8 +548,90 @@ test("the appended event is parseable by the journal reader", async (t) => {
   // The reader counts malformed lines; a kind it does not know would show up there.
   const { status, body } = await getJson(`${base}/api/courses/course-basic/journal`);
   assert.equal(status, 200);
-  assert.equal(body.events.count, 1, "the attempt is a well-formed event");
+  // unit 1's concept is 🟨, so a clean attempt also logs a badge award.
+  assert.equal(body.events.count, 2, "the attempt and the badge are both well-formed");
   assert.equal(body.events.malformed, 0, "not counted as malformed");
+});
+
+test("a clean attempt awards a badge event and reports it as pending, not applied", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(BASIC, ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  // unit 1 is alpha-one, currently 🟨. A clean attempt qualifies it for 🟩.
+  const res = await fetch(`${base}/api/courses/course-basic/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1, source: "authored", right: 3, wrong: 0, total: 3, itemIds: [] }),
+  });
+  const body = await res.json();
+  assert.equal(body.recorded, true);
+  assert.equal(body.mastery, null, "the FILE has not moved, so nothing is claimed");
+  assert.deepEqual(body.pendingBadge, {
+    concept: "alpha-one",
+    badge: "🟩",
+    state: "Proficient",
+  });
+
+  const events = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+  assert.deepEqual(events.map((e) => e.kind), ["assessment_result", "badge"]);
+  const badge = events[1];
+  assert.equal(badge.concept, "alpha-one");
+  assert.equal(badge.to, "🟩");
+  assert.equal(badge.source, "assessment", "not 'tool' or 'tag': this came from an attempt");
+});
+
+test("two mistakes forfeits Proficient, per the design's gate copy", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(BASIC, ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  // unit 3 is gamma-three, currently ⬜, so a Familiar award is still a raise.
+  const res = await fetch(`${base}/api/courses/course-basic/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 3, source: "authored", right: 1, wrong: 2, total: 3, itemIds: [] }),
+  });
+  const body = await res.json();
+  assert.equal(body.pendingBadge.badge, "🟨");
+  assert.equal(body.pendingBadge.state, "Familiar");
+
+  const events = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+  assert.equal(events.at(-1).to, "🟨");
+});
+
+test("an attempt never lowers a badge, so no event is written when it cannot raise", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(BASIC, ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  // unit 2 is beta-two, already 🟩. A clean attempt qualifies it for 🟩 — not a raise.
+  const res = await fetch(`${base}/api/courses/course-basic/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 2, source: "cache", right: 3, wrong: 0, total: 3, itemIds: [] }),
+  });
+  const body = await res.json();
+  assert.equal(body.pendingBadge, null);
+  assert.equal(body.mastery, null);
+
+  const events = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+  assert.deepEqual(events.map((e) => e.kind), ["assessment_result"], "the attempt is logged, the badge is not");
+});
+
+test("an authored unit spanning several concepts awards nothing", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(FIXTURES, "course-manifest", ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  const res = await fetch(`${base}/api/courses/course-manifest/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 2, source: "authored", right: 3, wrong: 0, total: 3, itemIds: [] }),
+  });
+  const body = await res.json();
+  assert.equal(body.recorded, true, "the attempt is still recorded");
+  assert.equal(body.pendingBadge, null, "there is no single concept whose badge could move");
 });
 
 test("a malformed result body is refused", async (t) => {

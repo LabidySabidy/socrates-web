@@ -570,6 +570,34 @@ test("a mastery claim renders only when the response actually carries one", () =
   assert.equal(view.masteryLine, "Skill moved to Proficient");
 });
 
+test("a qualified badge is reported as a qualification, never as a moved badge", () => {
+  const view = completionView({
+    right: 3,
+    wrong: 0,
+    total: 3,
+    recorded: true,
+    mastery: null,
+    pendingBadge: { concept: "idempotent-migrations", badge: "🟩", state: "Proficient" },
+  });
+  assert.equal(view.masteryLine, null, "the FILE has not moved, so no mastery claim");
+  assert.match(view.pendingLine!, /qualifies idempotent-migrations for Proficient/);
+  assert.match(view.pendingLine!, /next time a tutor session runs/);
+  assert.equal(/Skill moved/.test(view.pendingLine!), false);
+});
+
+test("no pending badge means no pending line", () => {
+  const none = completionView({ right: 1, wrong: 2, total: 3, recorded: true });
+  assert.equal(none.pendingLine, null);
+  const blank = completionView({
+    right: 1,
+    wrong: 2,
+    total: 3,
+    recorded: true,
+    pendingBadge: { concept: "x", badge: "", state: "" },
+  });
+  assert.equal(blank.pendingLine, null, "an empty state is not a qualification");
+});
+
 test("a failed recording says so rather than claiming history", () => {
   const view = completionView({
     right: 2,
