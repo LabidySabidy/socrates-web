@@ -291,3 +291,33 @@ fresh pi session (GL-013).
 **Tradeoffs:** P0 now spans two repos, so socrates-web's `npm test` cannot cover it and there is no single
 command that gates everything. Mitigated by the documented test command above and by keeping the extension
 tests self-contained. Also means P0 lands as a `pi-agent-harness` commit, reviewed on its own terms.
+
+## 2026-09-13 — Course paths are chosen with a server-side folder browser, on a loopback bind
+
+**Context:** Adding a course required typing an absolute path by hand. Browsers cannot hand a local
+server a real directory path: the File System Access API withholds the absolute path by design, and
+`<input type="file" webkitdirectory">` only yields uploaded file objects. A local app that must act on
+a path it can read therefore has to browse on the server and send paths back — which is what every
+local tool does, but it widens this API: `GET /api/fs` lists directory names under a caller-supplied
+path.
+
+**Decision:** `GET /api/fs?path=…` returns the sub-directories of a path, and the drive roots when no
+path is given. Directory names only — never file names, never contents — so it can be used to choose a
+folder and nothing else. Directories that are courses are flagged (`isCourse`) and courses sort first.
+The picker accepts a typed or pasted path as well as clicking, because a deep tree by clicking alone is
+tedious.
+
+Paired with that: **the server now binds to `127.0.0.1` by default** (`HOST` overrides). It previously
+bound every interface, which was tolerable while the API only read `.agent/learning`; publishing a
+filesystem listing on the LAN is not.
+
+**Alternatives considered:**
+- `<input webkitdirectory>` — rejected; it uploads files and never reveals the absolute path, so the
+  server could not register anything.
+- `showDirectoryPicker()` — rejected; the handle cannot be turned into a path the server can read.
+- A native OS dialog spawned server-side (PowerShell `FolderBrowserDialog`) — rejected; it needs an
+  interactive desktop session, blocks the server, and is invisible to the browser that asked for it.
+
+**Tradeoffs:** The app exposes directory names to anything that can reach the port, which is why the
+default bind changed in the same commit. Anyone who wants LAN access sets `HOST=0.0.0.0` deliberately
+and now knows what that publishes.

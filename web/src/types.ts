@@ -174,3 +174,19 @@ export interface Journal {
   };
   warnings: string[];
 }
+
+/** One directory in the server-side folder browser. Directories only, by design. */
+export interface DirEntry {
+  name: string;
+  path: string;
+  /** Has `.agent/learning/` — registration will be accepted. */
+  isCourse: boolean;
+  /** Has `MISSION.md` — a course the user actually started. */
+  initiated: boolean;
+}
+
+export interface BrowseResult {
+  path: string | null;
+  parent: string | null;
+  entries: DirEntry[];
+}

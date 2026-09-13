@@ -662,3 +662,57 @@ a.mod:hover { text-decoration: none; }
 }
 .empty-note .scaffold-action:hover { background: var(--action-tint); text-decoration: none; }
 .empty-note code { font-size: 12.5px; }
+
+/* folder picker — a server-side browser, so the field can be filled by choosing */
+.dir-row { display: flex; gap: 8px; }
+.dir-row input { flex: 1; min-width: 0; }
+.picker {
+  background: var(--paper);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(32, 31, 29, 0.16);
+  width: min(620px, 92vw);
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+}
+.picker-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 0; }
+.picker-path-row { display: flex; gap: 8px; margin: 8px 20px 10px; }
+.picker-path-row button { padding: 5px 12px; font-size: 12.5px; }
+.picker-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink-70);
+  padding: 6px 10px;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.picker-list { overflow-y: auto; min-height: 180px; padding: 0 8px; }
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--reading);
+  font-size: 14px;
+}
+.picker-row:hover { background: var(--action-tint); color: var(--ink); }
+.picker-icon { color: var(--ink-45); font-size: 11px; width: 12px; }
+.picker-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-badge { font-family: var(--ui); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 999px; padding: 2px 8px; }
+.picker-badge.course { border: 1px solid var(--success); color: var(--success); }
+.picker-badge.bare { border: 1px solid var(--warning); color: var(--warning-strong); }
+.picker-empty { color: var(--ink-55); font-size: 12.5px; padding: 10px 20px; margin: 0; }
+.picker-error { margin: 10px 20px; }
+.picker-foot { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--rule); padding: 12px 20px; }
+.picker-hint { flex: 1; color: var(--ink-45); }

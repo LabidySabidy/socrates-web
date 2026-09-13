@@ -829,6 +829,55 @@ test("any other mode value is treated as the default", async (t) => {
   assert.equal(await sent(), "hi");
 });
 
+// ---------------------------------------------------------------------------
+// folder browser — pick a directory instead of typing one
+// ---------------------------------------------------------------------------
+
+test("GET /api/fs with no path offers the drives", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/fs`);
+  assert.equal(status, 200);
+  assert.equal(body.path, null, "no directory is being listed yet");
+  assert.ok(body.entries.length >= 1, "at least one drive");
+  // No backslash literal: a Windows root is a drive letter, a colon, then a separator.
+  assert.ok(
+    body.entries.every((e: { path: string }) => e.path === "/" || /^[A-Z]:/.test(e.path)),
+    `every entry should be a root: ${JSON.stringify(body.entries.map((e: { path: string }) => e.path))}`,
+  );
+});
+
+test("GET /api/fs lists sub-directories and flags which are courses", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/fs?path=${encodeURIComponent(FIXTURES)}`);
+
+  assert.equal(status, 200);
+  assert.ok(body.path.endsWith("fixtures"), `listing should be rooted at the fixtures: ${body.path}`);
+  assert.ok(body.parent, "it can walk up");
+
+  const byName = Object.fromEntries(body.entries.map((e: { name: string }) => [e.name, e]));
+  assert.equal(byName["course-basic"].isCourse, true);
+  assert.equal(byName["course-basic"].initiated, true, "it has a MISSION.md");
+  assert.equal(byName["course-no-mission"].initiated, false, "learning dir, no mission");
+
+  // Courses sort first, and nothing that is not a directory appears.
+  const names = body.entries.map((e: { name: string }) => e.name);
+  assert.equal(byName[names[0]].isCourse, true, "a course leads the list");
+  assert.equal(names.includes("course-basic"), true);
+});
+
+test("a file path is refused as a directory, and a missing one says so", async (t) => {
+  const { base } = await boot(t);
+  const file = join(FIXTURES, "course-basic", ".agent", "learning", "MISSION.md");
+
+  const asDir = await getJson(`${base}/api/fs?path=${encodeURIComponent(file)}`);
+  assert.equal(asDir.status, 404);
+  assert.match(asDir.body.error, /not a directory/);
+
+  const missing = await getJson(`${base}/api/fs?path=${encodeURIComponent(join(FIXTURES, "nope"))}`);
+  assert.equal(missing.status, 404);
+  assert.match(missing.body.error, /no such directory/);
+});
+
 test("static files are served and path traversal is refused", async (t) => {
   const { base } = await boot(t);
   const index = await fetch(`${base}/`);

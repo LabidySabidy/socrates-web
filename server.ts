@@ -38,6 +38,7 @@ import {
 } from "./courses.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
+import { browse } from "./fs-browse.ts";
 import {
   awardedBadge,
   badgeState,
@@ -73,6 +74,8 @@ export const BUDAPEST_MODIFIER =
   "Force them to struggle and attempt a solution before revealing any documentation.";
 
 export interface ServerOptions {
+  /** Interface to bind. Defaults to loopback. */
+  host?: string;
   port?: number;
   /** The default course. Also the fallback scan doesn't apply if COURSES_ROOT is set. */
   projectDir?: string;
@@ -155,6 +158,12 @@ export function loadCourseTree(
 
 export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const port = opts.port ?? (Number(process.env.PORT) || 3850);
+  /**
+   * Loopback by default. The folder browser below lists directory names, which is a wider surface
+   * than the rest of this API, and this is a single-user local app — binding every interface would
+   * put that listing on the network. Set HOST=0.0.0.0 deliberately to expose it.
+   */
+  const host = opts.host ?? process.env.HOST ?? "127.0.0.1";
   const projectDir = opts.projectDir ?? process.env.PROJECT_DIR ?? process.cwd();
   const coursesRoot =
     opts.coursesRoot !== undefined
@@ -774,6 +783,18 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
     }
 
+    // --- folder browser: pick a course directory instead of typing a path -----
+    if (url === "/api/fs") {
+      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+      const asked = query.get("path");
+      try {
+        sendJson(res, 200, browse(asked === null || asked === "" ? null : asked));
+      } catch (err) {
+        sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
     // --- start a course: author the mission, the marker of intent -------------
     const initMatch = /^\/api\/courses\/([^/]+)\/init$/.exec(url);
     if (initMatch && req.method === "POST") {
@@ -1031,12 +1052,13 @@ ${BUDAPEST_MODIFIER}` : message;
   resyncWatchers();
 
   return new Promise<RunningServer>((resolvePromise) => {
-    server.listen(port, () => {
+    server.listen(port, host, () => {
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : port;
       console.log(`socrates-web: http://localhost:${actualPort}`);
       console.log(`default course: ${projectDir}`);
       console.log(`courses root:   ${coursesRoot ?? "(none)"}`);
+      console.log(`listening on:   ${host}:${actualPort}`);
       resolvePromise({
         server,
         port: actualPort,

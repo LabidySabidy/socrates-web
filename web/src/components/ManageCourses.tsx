@@ -9,6 +9,7 @@
  */
 import { useState } from "react";
 import { postCourse, startCourse } from "../api.ts";
+import { FolderPicker } from "./FolderPicker.tsx";
 import type { CourseRef } from "../types.ts";
 import { uninitiatedCourses } from "../select.ts";
 
@@ -35,6 +36,7 @@ export function ManageCourses({
   const [starting, setStarting] = useState<string | null>(null);
   const [destination, setDestination] = useState("");
   const [artifact, setArtifact] = useState("");
+  const [picking, setPicking] = useState(false);
 
   const uninitiated = uninitiatedCourses(courses);
 
@@ -112,12 +114,17 @@ export function ManageCourses({
           >
             <label>
               <span className="eyebrow">Directory</span>
-              <input
-                value={dir}
-                onChange={(e) => setDir(e.target.value)}
-                placeholder="F:/Development/SomeProject"
-                aria-label="Course directory"
-              />
+              <span className="dir-row">
+                <input
+                  value={dir}
+                  onChange={(e) => setDir(e.target.value)}
+                  placeholder="F:/Development/SomeProject"
+                  aria-label="Course directory"
+                />
+                <button type="button" onClick={() => setPicking(true)} aria-label="Browse for a folder">
+                  Browse…
+                </button>
+              </span>
             </label>
             <label>
               <span className="eyebrow">Label (optional)</span>
@@ -240,6 +247,17 @@ export function ManageCourses({
         <p className={result.kind === "ok" ? "manage-ok" : "notice"} role="status">
           {result.message}
         </p>
+      ) : null}
+
+      {picking ? (
+        <FolderPicker
+          start={dir.trim() || null}
+          onPick={(path) => {
+            setDir(path);
+            setPicking(false);
+          }}
+          onClose={() => setPicking(false)}
+        />
       ) : null}
     </section>
   );

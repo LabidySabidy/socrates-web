@@ -1,5 +1,5 @@
 /** api.ts — the only place the client talks to the server. */
-import type { CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
+import type { BrowseResult, CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
 import type { AssessmentsResponse } from "./assessment-types.ts";
 import type { InteractivesResponse } from "./interactives-types.ts";
 
@@ -165,3 +165,7 @@ export async function startCourse(
   if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
   return body;
 }
+
+/** List sub-directories, or the drives when `path` is null. Server-side: see fs-browse.ts. */
+export const browseDirs = (path: string | null) =>
+  get<BrowseResult>(path === null ? "/api/fs" : `/api/fs?path=${encodeURIComponent(path)}`);
