@@ -39,6 +39,7 @@ import {
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { browse } from "./fs-browse.ts";
+import { createCourse, listCourses, storeRoot } from "./course-store.ts";
 import {
   awardedBadge,
   badgeState,
@@ -187,8 +188,34 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
   };
 
-  const discover = (): DiscoveryResult =>
-    discoverCourses({ root: coursesRoot, projectDir, registryPath });
+  /**
+   * The course list: the STORE first, then anything the scan still finds. The scan is on its way out
+   * (see PLAN.md P16) and is listed second so a store course always wins an id collision.
+   */
+  const discover = (): DiscoveryResult => {
+    const scanned = discoverCourses({ root: coursesRoot, projectDir, registryPath });
+    const stored: CourseRef[] = listCourses().map((c) => ({
+      id: c.id,
+      dir: c.dir,
+      label: c.title,
+      title: c.title,
+      hidden: false,
+      order: null,
+      concepts: c.concepts,
+      masteryCounts: c.masteryCounts,
+      sessions: c.sessions,
+      initiated: true,
+      kind: "topic",
+      fromScan: false,
+      fromRegistry: false,
+      fromStore: true,
+    }));
+    const storedIds = new Set(stored.map((c) => c.id.toLowerCase()));
+    return {
+      ...scanned,
+      courses: [...stored, ...scanned.courses.filter((c) => !storedIds.has(c.id.toLowerCase()))],
+    };
+  };
 
   // --- chat / SSE state ------------------------------------------------------
   let turnLines: string[] = [];
@@ -427,15 +454,31 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     if (url === "/api/courses" && req.method === "POST") {
       try {
         const body = JSON.parse((await readBody(req)) || "{}") as {
+          subject?: unknown;
           dir?: unknown;
           label?: unknown;
           order?: unknown;
           action?: unknown;
         };
-        if (typeof body.dir !== "string" || !body.dir.trim()) {
-          sendJson(res, 400, { error: "dir required" });
+        // The articulate entry point: a SUBJECT, not a directory. Nothing on disk is pointed at, so
+        // this is checked FIRST — a request carrying a subject has no dir and must not be turned away
+        // by the directory guard below.
+        if (typeof body.subject === "string") {
+          const created = createCourse(body.subject);
+          if (!created.ok) {
+            sendJson(res, 400, { error: created.error });
+            return;
+          }
+          resyncWatchers();
+          sendJson(res, 201, { ok: true, id: created.id, dir: created.dir, courses: discover().courses });
           return;
         }
+
+        if (typeof body.dir !== "string" || !body.dir.trim()) {
+          sendJson(res, 400, { error: "dir or subject required" });
+          return;
+        }
+
         const action = typeof body.action === "string" ? body.action : "register";
         let result: { ok: boolean; error?: string };
         if (action === "register") {
@@ -1051,6 +1094,7 @@ ${BUDAPEST_MODIFIER}` : message;
       console.log(`socrates-web: http://localhost:${actualPort}`);
       console.log(`default course: ${projectDir}`);
       console.log(`courses root:   ${coursesRoot ?? "(none)"}`);
+      console.log(`course store:   ${storeRoot()}`);
       console.log(`listening on:   ${host}:${actualPort}`);
       resolvePromise({
         server,

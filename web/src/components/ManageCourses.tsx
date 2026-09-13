@@ -8,7 +8,8 @@
  * the server answers with `stillDiscovered` and we say so instead of appearing to do nothing.
  */
 import { useState } from "react";
-import { postCourse, startCourse } from "../api.ts";
+import { createCourseFromSubject, postCourse, startCourse } from "../api.ts";
+import { scaffoldHref } from "../grill.ts";
 import { FolderPicker } from "./FolderPicker.tsx";
 import type { CourseRef } from "../types.ts";
 import { uninitiatedCourses } from "../select.ts";
@@ -37,6 +38,8 @@ export function ManageCourses({
   const [destination, setDestination] = useState("");
   const [artifact, setArtifact] = useState("");
   const [picking, setPicking] = useState(false);
+  /** The articulate entry point: the learner names the subject, nothing is pointed at. */
+  const [subject, setSubject] = useState("");
 
   const uninitiated = uninitiatedCourses(courses);
 
@@ -103,6 +106,48 @@ export function ManageCourses({
 
       {open ? (
         <div className="manage-body">
+          {/* PRIMARY entry point. A subject in the learner's own words, then the tutor interviews
+              them — the scaffold skill is dispatched through the same ask mechanism as the grill. */}
+          <form
+            className="subject-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const clean = subject.trim();
+              if (!clean) return;
+              setBusy(true);
+              setResult(null);
+              void createCourseFromSubject(clean).then((res) => {
+                setBusy(false);
+                if (!res.ok || !res.id) {
+                  setResult({ kind: "error", message: res.error ?? "could not start the course" });
+                  return;
+                }
+                onChanged();
+                // Straight into the interview, with the prompt visible in the composer.
+                window.location.hash = scaffoldHref(res.id).slice(1);
+              });
+            }}
+          >
+            <label>
+              <span className="eyebrow">Start a course — what is the subject?</span>
+              <span className="dir-row">
+                <input
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Supabase row-level security"
+                  aria-label="Course subject"
+                />
+                <button type="submit" className="primary" disabled={busy || !subject.trim()}>
+                  Start course
+                </button>
+              </span>
+            </label>
+            <p className="manage-hint">
+              Your words become the title. Socrates then interviews you — what you will be able to do,
+              what you will build, what you already know — and writes the mission from your answers.
+            </p>
+          </form>
+
           <form
             className="add-form"
             onSubmit={(e) => {

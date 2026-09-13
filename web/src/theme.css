@@ -716,3 +716,17 @@ a.mod:hover { text-decoration: none; }
 .picker-error { margin: 10px 20px; }
 .picker-foot { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--rule); padding: 12px 20px; }
 .picker-hint { flex: 1; color: var(--ink-45); }
+
+/* the articulate entry point — the primary way a course begins */
+.subject-form { display: flex; flex-direction: column; gap: 8px; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--rule); }
+.subject-form label { display: flex; flex-direction: column; gap: 6px; }
+.subject-form input {
+  font: inherit;
+  font-family: var(--reading);
+  font-size: 15px;
+  padding: 9px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}

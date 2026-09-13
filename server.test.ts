@@ -14,6 +14,14 @@ import { startServer, type RunningServer } from "./server.ts";
 import { parseLearning } from "./learning-parser.ts";
 
 const FIXTURES = join(import.meta.dirname, "test", "fixtures");
+
+/**
+ * The course store is redirected for the whole suite. Without this the tests would read and write the
+ * real `~/.socrates/courses`, which is the user's data — and would then depend on whatever is in it.
+ */
+const STORE = mkdtempSync(join(tmpdir(), "socrates-test-store-"));
+process.env.SOCRATES_HOME = STORE;
+test.after?.(() => rmSync(STORE, { recursive: true, force: true }));
 const BASIC = join(FIXTURES, "course-basic");
 
 async function boot(t: { after(fn: () => Promise<void> | void): void }): Promise<{ base: string; running: RunningServer }> {
@@ -289,7 +297,7 @@ test("POST /api/courses rejects a non-course, a missing dir, and an unknown acti
 
   const missing = await post({});
   assert.equal(missing.status, 400);
-  assert.match(missing.body.error, /dir required/);
+  assert.match(missing.body.error, /dir or subject required/);
 
   const notACourse = await post({ dir: mkdtempSync(join(tmpdir(), "soc-plain-")) });
   assert.equal(notACourse.status, 400);
@@ -872,6 +880,74 @@ test("a file path is refused as a directory, and a missing one says so", async (
   const missing = await getJson(`${base}/api/fs?path=${encodeURIComponent(join(FIXTURES, "nope"))}`);
   assert.equal(missing.status, 404);
   assert.match(missing.body.error, /no such directory/);
+});
+
+// ---------------------------------------------------------------------------
+// the articulate entry point — a subject, not a directory
+// ---------------------------------------------------------------------------
+
+test("POST /api/courses with a subject creates a course in the store", async (t) => {
+  const { base } = await boot(t);
+  const res = await fetch(`${base}/api/courses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject: "Supabase RLS" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.id, "supabase-rls");
+  assert.equal(body.dir, join(STORE, "supabase-rls"), "it lands in the store, nowhere else");
+
+  const listed = body.courses.find((c: { id: string }) => c.id === "supabase-rls");
+  assert.ok(listed, "and it is in the catalogue immediately");
+  assert.equal(listed.title, "Supabase RLS", "titled from the learner's own words");
+  assert.equal(listed.fromStore, true);
+  assert.equal(listed.concepts, 0, "no concept cards until the tutor interviews them");
+
+  t.after(() => rmSync(join(STORE, "supabase-rls"), { recursive: true, force: true }));
+});
+
+test("the same subject twice is refused, and an empty one is refused", async (t) => {
+  const { base } = await boot(t);
+  const post = async (subject: string) => {
+    const res = await fetch(`${base}/api/courses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject }),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  const first = await post("React Internals");
+  assert.equal(first.status, 201);
+  t.after(() => rmSync(join(STORE, "react-internals"), { recursive: true, force: true }));
+
+  const again = await post("React Internals");
+  assert.equal(again.status, 400);
+  assert.match(again.body.error, /already exists/);
+
+  assert.equal((await post("   ")).status, 400);
+});
+
+test("a course created through the API is usable: its tree loads and it has a journal", async (t) => {
+  const { base } = await boot(t);
+  await fetch(`${base}/api/courses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject: "Idempotent Migrations" }),
+  });
+  t.after(() => rmSync(join(STORE, "idempotent-migrations"), { recursive: true, force: true }));
+
+  const tree = await getJson(`${base}/api/courses/idempotent-migrations`);
+  assert.equal(tree.status, 200);
+  assert.equal(tree.body.title, "Idempotent Migrations");
+  assert.deepEqual(tree.body.units, [], "no units until the tutor writes the concept cards");
+  assert.ok(tree.body.warnings.includes("no-schema"), "and it says why");
+
+  const journal = await getJson(`${base}/api/courses/idempotent-migrations/journal`);
+  assert.equal(journal.status, 200);
+  assert.deepEqual(journal.body.sessions, [], "a fresh course has no sessions");
 });
 
 test("static files are served and path traversal is refused", async (t) => {

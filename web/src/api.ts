@@ -169,3 +169,23 @@ export async function startCourse(
 /** List sub-directories, or the drives when `path` is null. Server-side: see fs-browse.ts. */
 export const browseDirs = (path: string | null) =>
   get<BrowseResult>(path === null ? "/api/fs" : `/api/fs?path=${encodeURIComponent(path)}`);
+
+export interface CreateCourseResult {
+  ok?: boolean;
+  id?: string;
+  dir?: string;
+  error?: string;
+  courses?: CourseRef[];
+}
+
+/** Start a course from a SUBJECT. Nothing on disk is pointed at; the store owns the directory. */
+export async function createCourseFromSubject(subject: string): Promise<CreateCourseResult> {
+  const res = await fetch("/api/courses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject }),
+  });
+  const body = (await res.json().catch(() => ({}))) as CreateCourseResult;
+  if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+  return body;
+}
