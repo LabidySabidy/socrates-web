@@ -1,0 +1,360 @@
+/**
+ * QuizPage — one problem at a time, with the reference design's branches:
+ * Check → Try again → Next → Finish, progressive hints, the two-mistake mastery gate, feedback
+ * toasts, and a completion panel.
+ *
+ * All state transitions live in `quiz.ts`; this file only renders them.
+ */
+import { useEffect, useState } from "react";
+import { fetchAssessments, fetchCourse, generateAssessments } from "../api.ts";
+import type { AssessmentsResponse } from "../assessment-types.ts";
+import type { CourseTree, Unit } from "../types.ts";
+import { hrefCourse } from "../router.ts";
+import {
+  actionLabel,
+  canSkip,
+  check as checkAnswer,
+  dismissGate,
+  initQuiz,
+  next as nextItem,
+  restart,
+  score,
+  setAnswer,
+  showHint,
+  showSolution,
+  tryAgain,
+  type QuizState,
+} from "../quiz.ts";
+
+export function QuizPage({
+  courseId,
+  unitNumber,
+  onExit,
+}: {
+  courseId: string;
+  unitNumber: number;
+  onExit: () => void;
+}) {
+  const [tree, setTree] = useState<CourseTree | null>(null);
+  const [data, setData] = useState<AssessmentsResponse | null>(null);
+  const [state, setState] = useState<QuizState>(() => initQuiz(0));
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    Promise.all([fetchCourse(courseId), fetchAssessments(courseId, unitNumber)])
+      .then(([t, a]) => {
+        if (!alive) return;
+        setTree(t);
+        setData(a);
+        setState(initQuiz(a.items.length));
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setData({
+          unit: unitNumber,
+          source: "none",
+          items: [],
+          warnings: [],
+          error: "could not load the quiz",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [courseId, unitNumber]);
+
+  const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? null;
+  const item = data?.items[state.index];
+  const label = data && data.items.length > 0 ? actionLabel(state) : null;
+
+  // Toasts auto-dismiss, matching the reference's 5s quiz toast.
+  useEffect(() => {
+    if (state.feedback === "correct") setToast("There you go! Keep it up!");
+    else if (state.feedback === "incorrect") setToast("Not quite! Give it another try!");
+    else setToast(null);
+    if (state.feedback === "none") return;
+    const id = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(id);
+  }, [state.feedback, state.index]);
+
+  async function generate() {
+    setGenerating(true);
+    const result = await generateAssessments(courseId, unitNumber, 3);
+    setGenerating(false);
+    if (result.error) {
+      setData(result);
+      return;
+    }
+    setData(result);
+    setState(initQuiz(result.items.length));
+  }
+
+  function primary() {
+    if (!item) return;
+    switch (label) {
+      case "Check":
+        setState((s) => checkAnswer(s, item));
+        return;
+      case "Try again":
+        setState((s) => tryAgain(s));
+        return;
+      case "Next":
+        setState((s) => nextItem(s));
+        return;
+      case "Finish":
+        setState((s) => nextItem(s));
+        return;
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="page">
+        <p className="greeting-sub reading">Loading quiz…</p>
+      </main>
+    );
+  }
+
+  // A failed generation shows WHY. It never renders a partly built quiz.
+  if (data?.error) {
+    return (
+      <div className="lesson">
+        <nav className="lesson-bar" aria-label="Quiz">
+          <span className="crumbs">
+            <a href={hrefCourse(courseId, unitNumber)} onClick={onExit}>
+              {tree?.title ?? courseId}
+            </a>
+            <span aria-hidden="true"> › </span>
+            <span>Unit {unitNumber}</span>
+          </span>
+          <button type="button" onClick={onExit}>
+            Exit Lesson
+          </button>
+        </nav>
+        <main className="page">
+          <h1 className="display greeting">This quiz could not be prepared</h1>
+          <p className="greeting-sub reading">{data.error}</p>
+          {data.detail ? <p className="notice">{data.detail}</p> : null}
+          {data.excerpt ? <pre className="excerpt">{data.excerpt}</pre> : null}
+          <div className="quiz-actions">
+            <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
+              {generating ? "Generating…" : "Try generating again"}
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!data || data.items.length === 0) {
+    return (
+      <div className="lesson">
+        <nav className="lesson-bar" aria-label="Quiz">
+          <span className="crumbs">
+            <a href={hrefCourse(courseId, unitNumber)} onClick={onExit}>
+              {tree?.title ?? courseId}
+            </a>
+            <span aria-hidden="true"> › </span>
+            <span>Unit {unitNumber}</span>
+          </span>
+          <button type="button" onClick={onExit}>
+            Exit Lesson
+          </button>
+        </nav>
+        <main className="page">
+          <h1 className="display greeting">No quiz yet</h1>
+          <p className="greeting-sub reading">
+            This unit has no authored quiz. The tutor can write one for{" "}
+            {unit ? `“${unit.title}”` : "this unit"}, grounded in the concept cards.
+          </p>
+          <div className="quiz-actions">
+            <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
+              {generating ? "Generating…" : "Generate a quiz"}
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (state.done) {
+    const result = score(state);
+    return (
+      <div className="lesson">
+        <nav className="lesson-bar" aria-label="Quiz">
+          <span className="crumbs">
+            <a href={hrefCourse(courseId, unitNumber)} onClick={onExit}>
+              {tree?.title ?? courseId}
+            </a>
+            <span aria-hidden="true"> › </span>
+            <span>Unit {unitNumber}</span>
+          </span>
+          <button type="button" onClick={onExit}>
+            Exit Lesson
+          </button>
+        </nav>
+        <main className="page quiz-done">
+          <div className="eyebrow">Quiz complete</div>
+          <h1 className="display">Nice work.</h1>
+          <p className="reading quiz-mastery">
+            Skill moved to <strong>{result.wrong === 0 ? "Proficient" : "Familiar"}</strong>
+          </p>
+          <p className="reading">
+            {result.right} of {state.count} correct
+            {result.wrong > 0 ? ` · ${result.wrong} answered wrong` : " · no mistakes"}
+          </p>
+          <div className="quiz-actions">
+            <button type="button" className="primary" onClick={() => setState(restart(state))}>
+              Start over
+            </button>
+            <button type="button" onClick={onExit}>
+              Back to the unit
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const hintsRemaining = item ? item.hints.length - state.hintsShown : 0;
+
+  return (
+    <div className="lesson">
+      <nav className="lesson-bar" aria-label="Quiz">
+        <span className="crumbs">
+          <a href={hrefCourse(courseId, unitNumber)} onClick={onExit}>
+            {tree?.title ?? courseId}
+          </a>
+          <span aria-hidden="true"> › </span>
+          <span>Unit {unitNumber}</span>
+          {unit ? (
+            <>
+              <span aria-hidden="true"> › </span>
+              <span aria-current="page">{unit.title}</span>
+            </>
+          ) : null}
+        </span>
+        <span className="lesson-bar-right">
+          <span className="eyebrow quiz-source">
+            {data.source === "authored" ? "authored quiz" : data.source === "generated" ? "generated quiz" : "cached quiz"}
+          </span>
+          <button type="button" onClick={onExit}>
+            Exit Lesson
+          </button>
+        </span>
+      </nav>
+
+      <div className="lesson-scroll">
+        <div className="quiz">
+          <div className="eyebrow">{unit ? `Unit ${unit.n} · ${unit.title}` : "Quiz"}</div>
+          <h1 className="display quiz-prompt">{item?.prompt}</h1>
+
+          <div className="quiz-input-row">
+            <input
+              className={`quiz-input${state.wrong ? " wrong" : ""}${state.locked ? " locked" : ""}`}
+              value={state.answer}
+              onChange={(e) => setState((s) => setAnswer(s, e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") primary();
+              }}
+              placeholder="Answer"
+              aria-label="Your answer"
+              disabled={state.locked}
+            />
+          </div>
+
+          {state.locked && item ? (
+            <div className="quiz-solution">
+              <button type="button" className="link" onClick={() => setState((s) => showSolution(s))}>
+                See a step-by-step solution
+              </button>
+              {state.solutionOpen ? (
+                <ol className="steps">
+                  {item.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              ) : null}
+              {item.cites.length > 0 ? (
+                <p className="eyebrow quiz-cite">Source: {item.cites.join(", ")}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {state.hintsShown > 0 && item ? (
+            <div className="hints">
+              <div className="eyebrow">
+                Hint {state.hintsShown}/{item.hints.length}
+              </div>
+              <ol className="steps">
+                {item.hints.slice(0, state.hintsShown).map((hint, i) => (
+                  <li key={i}>{hint}</li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          {state.wrong && hintsRemaining > 0 ? (
+            <button type="button" className="hints-toggle" onClick={() => setState((s) => showHint(s, item))}>
+              {state.hintsShown === 0 ? "Hints" : `Next hint (${state.hintsShown}/${item!.hints.length})`}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="quiz-foot">
+        <span className="eyebrow">
+          {state.index + 1} of {state.count}
+        </span>
+        <span className="dots" aria-label="Progress">
+          {state.dots.map((dot, i) => (
+            <span key={i} className={`dot ${dot}`} aria-hidden="true" />
+          ))}
+        </span>
+        <span className="spacer" />
+        {canSkip(state) ? (
+          <button type="button" onClick={() => setState((s) => nextItem(s))}>
+            Skip
+          </button>
+        ) : null}
+        <button type="button" className="primary" onClick={primary} disabled={!state.locked && state.answer.trim() === ""}>
+          {label}
+        </button>
+      </div>
+
+      {toast ? (
+        <div className={`quiz-toast ${state.feedback}`} role="status">
+          {toast}
+        </div>
+      ) : null}
+
+      {state.gateOpen ? (
+        <div className="scrim" role="dialog" aria-modal="true" aria-label="Mastery gate">
+          <div className="gate">
+            <h2 className="display">Would you like to start over?</h2>
+            <p className="reading">
+              You can no longer reach &ldquo;Proficient&rdquo; on this attempt. You can keep going or
+              start over. Start over is available after two mistakes.
+            </p>
+            <div className="quiz-actions">
+              <button type="button" className="primary" onClick={() => setState((s) => restart(s))}>
+                Start over
+              </button>
+              <button type="button" onClick={() => setState((s) => dismissGate(s))}>
+                Keep going
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

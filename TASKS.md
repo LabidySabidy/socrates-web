@@ -231,10 +231,25 @@
       verification run. Found because the page was still executing a previous asset hash.
 
 ## P5 — Assessments
-- [ ] **T-028** Authored items from `COURSE.md`, else pi-generated under a validated structured contract
+- [x] **T-028** Authored items from `COURSE.md`, else pi-generated under a validated structured contract
       (`kind: codebase` items cite real artifacts), then cached. **Done when:** an invalid generation fails loudly.
-- [ ] **T-029** Quiz UI: Check → Try again → Next → Finish, hints 1/3→3/3, two-mistake gate, toasts,
+      **Done** — `## Quiz: <title>` sections in `COURSE.md` author items inline (answer, accepts, 3 hints,
+      steps, cites), bound to the unit that precedes them. Authored items pass the SAME gate as generated ones.
+      `assessments.ts` validates; nothing is served unless it validates. Citations are checked against the real
+      filesystem, including `#Lnn` line anchors, and are mandatory for a `codebase` course. Generation runs a
+      one-shot agent turn (`runTurn`, which never touches the SSE slot), extracts a fenced JSON block, validates,
+      and caches to `<course>/.agent/learning/ASSESSMENTS/unit-N.json`.
+      **Failure paths verified:** no JSON block → 422 with the reason and an excerpt; a citation to a nonexistent
+      file → 422 `citation-not-found:<path>`; a timeout or spawn failure → 502. A partly invalid generation
+      serves the valid items and reports `rejected`, never a silently partial quiz.
+- [x] **T-029** Quiz UI: Check → Try again → Next → Finish, hints 1/3→3/3, two-mistake gate, toasts,
       completion panel. **Done when:** browser-verified across all five branches.
+      **Done** — `#/quiz/:courseId/:unit`, opened from `quiz`/`test`/`course-challenge` module rows. All
+      transitions live in the pure `web/src/quiz.ts` (17 client tests cover the branches) and the page only
+      renders state. Browser-verified: incorrect (toast + hints offered + Skip withdrawn), hints 1/3 → 3/3 and
+      no 4/3, the gate on the second mistake with BOTH choices (Start over resets index/dots/hints/mistakes;
+      Keep going dismisses but retains them), correct (toast + lock + step solution + the repo citation shown),
+      and completion ("Skill moved to Proficient", 3 of 3).
 
 ## P6 — Interactives and games
 - [ ] **T-030** Interactive + game module types rendered from a declared or generated definition.

@@ -1,5 +1,6 @@
 /** api.ts — the only place the client talks to the server. */
 import type { CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
+import type { AssessmentsResponse } from "./assessment-types.ts";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: "application/json" } });
@@ -54,4 +55,37 @@ export async function fetchSessionMarkdown(id: string, file: string): Promise<st
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
+}
+
+/** Quiz items for a unit: authored when the course declares them, else previously generated. */
+export const fetchAssessments = (id: string, unit: number) =>
+  get<AssessmentsResponse>(`/api/courses/${encodeURIComponent(id)}/assessments?unit=${unit}`);
+
+/**
+ * Ask the tutor to generate items. A failure returns the parsed error body rather than throwing,
+ * so the caller can render the reason instead of an empty quiz.
+ */
+export async function generateAssessments(
+  id: string,
+  unit: number,
+  count = 3,
+): Promise<AssessmentsResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/assessments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit, count }),
+  });
+  const body = (await res.json().catch(() => ({}))) as AssessmentsResponse;
+  if (!res.ok) {
+    return {
+      unit,
+      source: "none",
+      items: [],
+      warnings: [],
+      error: body.error ?? `HTTP ${res.status}`,
+      detail: body.detail,
+      excerpt: body.excerpt,
+    };
+  }
+  return body;
 }

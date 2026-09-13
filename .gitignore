@@ -31,6 +31,9 @@ test/fixtures/**/.agent/learning/SESSIONS/
 # to parse. Runtime artifacts in every OTHER fixture stay ignored.
 !test/fixtures/course-with-journal/.agent/learning/SESSIONS/
 test/fixtures/**/.agent/learning/telemetry-errors.log
+# Generated assessments are runtime artifacts too, and carry an absolute path in no case —
+# but they are generated, not authored, so they must not be committed.
+test/fixtures/**/.agent/learning/ASSESSMENTS/
 # The registry is runtime state too — a test that registers a course must not dirty a fixture.
 test/fixtures/**/.agent/courses.json
 test/fixtures/**/.agent/telemetry*

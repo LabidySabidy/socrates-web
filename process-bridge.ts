@@ -81,6 +81,11 @@ export class ProcessBridge {
     this.ensureSpawned();
   }
 
+  /** Detach a handler — used by one-shot callers that must not keep consuming output. */
+  offLine(handler: LineHandler): void {
+    this.lineHandlers.delete(handler);
+  }
+
   onExit(handler: ExitHandler): void {
     this.exitHandlers.add(handler);
   }

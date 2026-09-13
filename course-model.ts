@@ -19,6 +19,7 @@
  */
 import type { Badge, LearningData } from "./learning-parser.ts";
 import { SEVERITIES, severityState, type SeverityState } from "./learning-parser.ts";
+import { courseOracle, validateItems, type AssessmentItem, type CiteOracle, type Quiz } from "./assessments.ts";
 
 // ---------------------------------------------------------------------------
 // Mastery — the five-state union. Six states is never correct.
@@ -152,6 +153,8 @@ export interface CourseTree {
   mission: LearningData["mission"];
   plan: { sequence: LearningData["plan"]["sequence"]; cutList: string[] };
   units: Unit[];
+  /** Authored quizzes, bound to a unit by manifest position. Validated on load. */
+  quizzes: Quiz[];
   mastery: { counts: Record<MasteryState, number>; aggregate: Mastery; total: number };
 }
 
@@ -278,9 +281,10 @@ export function deriveUnits(src: CourseSource, warnings: string[]): Unit[] {
   });
 }
 
-export function buildCourse(src: CourseSource): CourseTree {
+export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {}): CourseTree {
   const warnings: string[] = [];
   const present = src.data.present;
+  const oracle = opts.oracle ?? courseOracle(src.dir);
 
   if (!present.includes("SCHEMA.md")) warnings.push(WARN.noSchema);
   if (!present.includes("MISSION.md")) warnings.push(WARN.noMission);
@@ -290,6 +294,7 @@ export function buildCourse(src: CourseSource): CourseTree {
     mission.destination.trim() || src.manifestText?.match(/^title:\s*(.+)$/m)?.[1]?.trim() || src.id;
 
   let units = deriveUnits(src, warnings);
+  let quizzes: Quiz[] = [];
   let derived = true;
   let kind: CourseTree["kind"] = "topic";
   let courseTitle = title;
@@ -300,11 +305,28 @@ export function buildCourse(src: CourseSource): CourseTree {
       warnings.push(WARN.manifestInvalid(parsed.error));
     } else {
       units = parsed.units;
+      quizzes = parsed.quizzes;
       derived = false;
       kind = parsed.kind;
       if (parsed.title) courseTitle = parsed.title;
       warnings.push(...parsed.warnings);
     }
+  }
+
+  // An authored item must satisfy the same gate a generated one does, or it is not served.
+  if (quizzes.length > 0) {
+    const checked: Quiz[] = [];
+    for (const quiz of quizzes) {
+      const { items, errors } = validateItems(quiz.items, {
+        kind,
+        oracle,
+        prefix: `${quiz.id}-q`,
+      });
+      for (const error of errors) warnings.push(`assessment-invalid:${quiz.id}:${error}`);
+      if (items.length > 0) checked.push({ ...quiz, items });
+      else if (errors.length > 0) warnings.push(`assessment-dropped:${quiz.id}`);
+    }
+    quizzes = checked;
   }
 
   if (units.length === 0 && !warnings.includes(WARN.noConcepts)) warnings.push(WARN.noConcepts);
@@ -320,6 +342,7 @@ export function buildCourse(src: CourseSource): CourseTree {
     mission,
     plan: { sequence: src.data.plan.sequence, cutList: src.data.plan.cutList },
     units,
+    quizzes,
     mastery: {
       counts: countByMastery(conceptMasteries),
       aggregate: aggregateMastery(conceptMasteries),
@@ -334,6 +357,7 @@ export function buildCourse(src: CourseSource): CourseTree {
 
 export interface ManifestResult {
   units: Unit[];
+  quizzes: Quiz[];
   kind: CourseTree["kind"];
   title?: string;
   warnings: string[];
@@ -341,6 +365,9 @@ export interface ManifestResult {
 
 const UNIT_RE = /^##\s+Unit\s+(\d+)\s*:\s*(.+?)\s*$/;
 const GROUP_RE = /^###\s+Group\s*:\s*(.+?)\s*$/;
+const QUIZ_SECTION_RE = /^##\s+Quiz\s*:\s*(.+?)\s*$/;
+const QUESTION_RE = /^-\s+\*\*Q\*\*\s+(.*)$/;
+const ITEM_FIELD_RE = /^\s+-\s+\*\*(answer|accepts|hint|step|cite):\*\*\s*(.*)$/i;
 const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z][a-z-]*)`\)\s+(.*)$/;
 const QUIZ_RE = /^-\s+\*\*Quiz\*\*\s+(\d+)\s+items?\s*$/;
 const REF_RE = /@([a-z0-9][a-z0-9-]*)/i;
@@ -372,6 +399,13 @@ export function parseCourseManifest(
   let unit: Unit | null = null;
   let group: LessonGroup | null = null;
 
+  // Authored quiz items are collected as raw text here and validated by buildCourse, so an
+  // invalid authored item fails the same gate a generated one does.
+  type RawItem = { prompt: string; answer?: string; accepts: string[]; hints: string[]; steps: string[]; cites: string[] };
+  let quiz: { title: string; unit: number; items: RawItem[] } | null = null;
+  const sections: { title: string; unit: number; items: RawItem[] }[] = [];
+  let item: RawItem | null = null;
+
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
@@ -397,6 +431,38 @@ export function parseCourseManifest(
       };
       units.push(unit);
       group = null;
+      quiz = null;
+      item = null;
+      continue;
+    }
+
+    // A quiz section binds to whichever unit precedes it in the document.
+    const quizSection = QUIZ_SECTION_RE.exec(line);
+    if (quizSection) {
+      if (!unit) return { error: `quiz before any unit: ${quizSection[1]}` };
+      if (quiz) sections.push(quiz);
+      quiz = { title: quizSection[1], unit: unit.n, items: [] };
+      item = null;
+      continue;
+    }
+
+    const question = QUESTION_RE.exec(line);
+    if (question) {
+      if (!quiz) return { error: `question before any quiz section: ${question[1]}` };
+      item = { prompt: question[1].trim(), accepts: [], hints: [], steps: [], cites: [] };
+      quiz.items.push(item);
+      continue;
+    }
+
+    const field = ITEM_FIELD_RE.exec(raw);
+    if (field && quiz && item) {
+      const key = field[1].toLowerCase();
+      const value = field[2].trim();
+      if (key === "answer") item.answer = value;
+      else if (key === "accepts") item.accepts.push(...value.split("|").map((v) => v.trim()).filter(Boolean));
+      else if (key === "hint") item.hints.push(value);
+      else if (key === "step") item.steps.push(value);
+      else if (key === "cite") item.cites.push(value);
       continue;
     }
 
@@ -463,6 +529,19 @@ export function parseCourseManifest(
   }
 
   if (units.length === 0) return { error: "no units declared" };
+  if (quiz) sections.push(quiz);
+
+  const authoredQuizzes: Quiz[] = sections
+    // An empty section is a declaration the tutor should fill, not a broken quiz.
+    .filter((s) => s.items.length > 0)
+    .map((s) => ({
+      id: slug(s.title),
+      title: s.title,
+      unit: s.unit,
+      // Items are validated in buildCourse, where the course kind and the filesystem are known.
+      items: s.items as unknown as AssessmentItem[],
+      source: "authored" as const,
+    }));
 
   // unit mastery follows from the concepts it references, so an authored unit is not
   // forced to invent a mastery value
@@ -473,7 +552,13 @@ export function parseCourseManifest(
     u.mastery = aggregateMastery(cards.map((c) => masteryOf(c.badge)));
   }
 
-  return { units, kind: kindMatch?.[1] === "codebase" ? "codebase" : "topic", title: titleMatch?.[1], warnings };
+  return {
+    units,
+    quizzes: authoredQuizzes,
+    kind: kindMatch?.[1] === "codebase" ? "codebase" : "topic",
+    title: titleMatch?.[1],
+    warnings,
+  };
 }
 
 // ---------------------------------------------------------------------------

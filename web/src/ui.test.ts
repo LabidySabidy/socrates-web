@@ -19,6 +19,20 @@ import {
 } from "./select.ts";
 import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
 import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
+import { isCorrect, type AssessmentItem } from "./assessment-types.ts";
+import {
+  actionLabel,
+  canSkip,
+  check,
+  dismissGate,
+  initQuiz,
+  next as nextItem,
+  restart,
+  score,
+  setAnswer,
+  showHint,
+  tryAgain,
+} from "./quiz.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
 import type { CourseRef, LearningData, Misconception } from "./types.ts";
 
@@ -345,4 +359,184 @@ test("scroll keys are per course and unit, and absent storage is not fatal", () 
   // no window in this environment: both helpers must degrade rather than throw
   assert.equal(readPaneScroll("alg:3"), null);
   assert.doesNotThrow(() => savePaneScroll("alg:3", 120));
+});
+
+// ---------------------------------------------------------------------------
+// answer checking (the client owns this rule)
+// ---------------------------------------------------------------------------
+
+test("numeric answers compare numerically so 3 accepts 3.0 and padded input", () => {
+  assert.equal(isCorrect({ answer: "3", accepts: [] }, "3"), true);
+  assert.equal(isCorrect({ answer: "3", accepts: [] }, " 3.0 "), true);
+  assert.equal(isCorrect({ answer: "3", accepts: [] }, "4"), false);
+  assert.equal(isCorrect({ answer: "3", accepts: [] }, ""), false);
+  assert.equal(isCorrect({ answer: "1,000", accepts: [] }, "1000"), true);
+});
+
+test("text answers normalise case, whitespace and trailing punctuation, and accepts widens the match", () => {
+  const item = { answer: "status = 'approved'", accepts: ["status='approved'"] };
+  assert.equal(isCorrect(item, "STATUS = 'APPROVED'"), true);
+  assert.equal(isCorrect(item, "status='approved'"), true, "via accepts");
+  assert.equal(isCorrect(item, "status = 'pending'"), false);
+});
+
+// ---------------------------------------------------------------------------
+// the quiz state machine — every branch
+// ---------------------------------------------------------------------------
+
+const item = (over: Partial<AssessmentItem> = {}): AssessmentItem => ({
+  id: "q1",
+  prompt: "p",
+  answer: "3",
+  accepts: [],
+  hints: ["h1", "h2", "h3"],
+  steps: ["s1", "s2", "s3"],
+  cites: [],
+  ...over,
+});
+
+test("the two-mistake gate opens exactly on the second mistake, not before", () => {
+  let s = initQuiz(3);
+  s = setAnswer(s, "4");
+  s = check(s, item());
+  assert.equal(s.mistakes, 1);
+  assert.equal(s.gateOpen, false, "one mistake is not a gate");
+  assert.equal(s.feedback, "incorrect");
+  assert.equal(s.wrong, true);
+
+  s = tryAgain(s);
+  assert.equal(s.wrong, false, "the input is editable again");
+
+  s = check(s, item());
+  assert.equal(s.mistakes, 2);
+  assert.equal(s.gateOpen, true, "the gate opens on the second mistake");
+  assert.equal(s.totalMistakes, 2);
+});
+
+test("a correct answer locks the item, marks the dot, and never opens the gate", () => {
+  let s = initQuiz(3);
+  s = setAnswer(s, "3.0");
+  s = check(s, item());
+  assert.equal(s.locked, true);
+  assert.equal(s.feedback, "correct");
+  assert.equal(s.dots[0], "right");
+  assert.equal(s.gateOpen, false);
+  assert.equal(setAnswer(s, "9").answer, "3.0", "a locked item cannot be edited");
+  assert.equal(check(s, item()).locked, true, "re-checking a locked item changes nothing");
+});
+
+test("the primary action cycles Check → Try again → Next → Finish", () => {
+  let s = initQuiz(2);
+  assert.equal(actionLabel(s), "Check");
+  s = setAnswer(s, "4");
+  s = check(s, item());
+  assert.equal(actionLabel(s), "Try again");
+  s = tryAgain(s);
+  assert.equal(actionLabel(s), "Check");
+  s = setAnswer(s, "3");
+  s = check(s, item());
+  assert.equal(actionLabel(s), "Next");
+  s = nextItem(s);
+  assert.equal(s.index, 1);
+  assert.equal(actionLabel(s), "Check", "a fresh item is back to Check");
+  s = setAnswer(s, "3");
+  s = check(s, item());
+  assert.equal(actionLabel(s), "Finish", "the last item finishes");
+});
+
+test("Skip is withdrawn once wrong, and a wrong dot is recorded", () => {
+  let s = initQuiz(3);
+  assert.equal(canSkip(s), true);
+  s = setAnswer(s, "9");
+  s = check(s, item());
+  assert.equal(canSkip(s), false);
+  assert.equal(s.dots[0], "wrong");
+});
+
+test("hints are revealed one at a time and stop at the last one", () => {
+  let s = initQuiz(2);
+  assert.equal(s.hintsShown, 0);
+  s = showHint(s, item());
+  assert.equal(s.hintsShown, 1);
+  s = showHint(s, item());
+  s = showHint(s, item());
+  assert.equal(s.hintsShown, 3);
+  s = showHint(s, item());
+  assert.equal(s.hintsShown, 3, "there is no 4/3");
+});
+
+test("next advances, resets per-item state, and moving on clears the gate", () => {
+  let s = initQuiz(3);
+  s = setAnswer(s, "9");
+  s = check(s, item());
+  s = check(s, item());
+  s = showHint(s, item());
+  assert.equal(s.gateOpen, true);
+
+  s = nextItem(s);
+  assert.equal(s.index, 1);
+  assert.equal(s.mistakes, 0, "mistakes are per attempt");
+  assert.equal(s.hintsShown, 0);
+  assert.equal(s.gateOpen, false);
+  assert.equal(s.answer, "");
+  assert.equal(s.locked, false);
+  assert.equal(s.feedback, "none");
+  assert.equal(s.totalMistakes, 2, "the running total survives");
+  assert.deepEqual(s.dots, ["wrong", "current", "pending"]);
+});
+
+test("the last Next finishes the quiz rather than running off the end", () => {
+  let s = initQuiz(1);
+  s = nextItem(s);
+  assert.equal(s.done, true);
+  assert.equal(nextItem(s).index, 0, "a finished quiz does not advance");
+});
+
+test("Start over resets everything: index, dots, hints and mistakes", () => {
+  let s = initQuiz(3);
+  s = setAnswer(s, "9");
+  s = check(s, item());
+  s = check(s, item());
+  s = showHint(s, item());
+  s = nextItem(s);
+
+  s = restart(s);
+  assert.equal(s.index, 0);
+  assert.equal(s.mistakes, 0);
+  assert.equal(s.totalMistakes, 0);
+  assert.equal(s.hintsShown, 0);
+  assert.equal(s.gateOpen, false);
+  assert.equal(s.done, false);
+  assert.deepEqual(s.dots, ["current", "pending", "pending"], "a full reset, not a partial one");
+});
+
+test("Keep going dismisses the gate but leaves the attempt otherwise untouched", () => {
+  let s = initQuiz(2);
+  s = setAnswer(s, "9");
+  s = check(s, item());
+  s = check(s, item());
+  const kept = dismissGate(s);
+  assert.equal(kept.gateOpen, false);
+  assert.equal(kept.mistakes, 2, "the mistakes still count");
+  assert.equal(kept.dots[0], "wrong");
+  assert.equal(kept.answer, "9");
+});
+
+test("an empty answer is not checkable and does not count as a mistake", () => {
+  let s = initQuiz(2);
+  s = check(s, item());
+  assert.equal(s.mistakes, 0);
+  assert.equal(s.feedback, "none");
+  assert.equal(setAnswer(s, "   ").answer, "   ", "whitespace alone still cannot be checked");
+  assert.equal(check({ ...s, answer: "   " }, item()).mistakes, 0);
+});
+
+test("the score counts right and wrong dots", () => {
+  let s = initQuiz(3);
+  s = setAnswer(s, "3");
+  s = check(s, item());
+  s = nextItem(s);
+  s = setAnswer(s, "9");
+  s = check(s, item());
+  assert.deepEqual(score(s), { right: 1, wrong: 1 });
 });

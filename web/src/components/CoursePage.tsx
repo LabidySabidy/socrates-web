@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchCourse, fetchLearning } from "../api.ts";
 import type { CourseRef, CourseTree, LearningData, Unit } from "../types.ts";
 import { MASTERY_STATES, mastery } from "../severity.ts";
-import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
+import { hrefCourse, hrefHome, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
@@ -12,6 +12,9 @@ import { JournalPanel } from "./JournalPanel.tsx";
 
 /** Module types that run as a live tutor session. */
 const TUTOR_MODULE_TYPES = new Set(["recite", "explain", "ai-activity"]);
+
+/** Module types that open the quiz console. */
+const QUIZ_MODULE_TYPES = new Set(["quiz", "test", "course-challenge"]);
 
 const LEGEND = [
   { label: "Not started", color: "#c9c6bd" },
@@ -171,12 +174,15 @@ export function CoursePage({
                     // Tutor-backed activities open the chat console; other types keep their
                     // screens deferred (P5/P6), so their rows stay static.
                     const opensLesson = TUTOR_MODULE_TYPES.has(mod.type);
+                    const opensQuiz = QUIZ_MODULE_TYPES.has(mod.type);
                     const Row = opensLesson ? "a" : "div";
                     return (
                     <Row
                       className="mod"
                       key={mod.id}
-                      {...(opensLesson && selected
+                      {...(opensQuiz && selected
+                        ? { href: hrefQuiz(courseId, selected.n) }
+                        : opensLesson && selected
                         ? {
                             href: hrefLesson(courseId, selected.n),
                             // Save on the way OUT of the course page: by the time the lesson

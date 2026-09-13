@@ -37,6 +37,14 @@ import {
 } from "./courses.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown } from "./journal.ts";
+import {
+  buildGenerationPrompt,
+  courseOracle,
+  extractItems,
+  readCache,
+  validateItems,
+  writeCache,
+} from "./assessments.ts";
 
 export interface ServerOptions {
   port?: number;
@@ -279,6 +287,58 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     console.log(`[watcher] watching ${watchers.length} course(s) under ${coursesRoot ?? "(none)"}`);
   }
 
+  // --- one-shot turns (generation) --------------------------------------------
+  // Not a chat turn: it consumes the agent's output itself and never touches the SSE slot, so a
+  // request that awaits generation cannot be interleaved with the user's own conversation.
+  function runTurn(
+    dir: string,
+    message: string,
+    timeoutMs = 180_000,
+  ): Promise<{ text: string; error?: string }> {
+    return new Promise((resolvePromise) => {
+      if (!chatEnabled) return resolvePromise({ text: "", error: "chat is disabled" });
+      if (!settled) return resolvePromise({ text: "", error: "a chat turn is already in progress" });
+
+      bridge.switchCourse(dir);
+      turnCourse = null;
+
+      let text = "";
+      let finished = false;
+      const finish = (result: { text: string; error?: string }) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        bridge.offLine(handler);
+        bridge.markIdle();
+        resolvePromise(result);
+      };
+
+      const handler = (line: string) => {
+        let evt: Record<string, unknown> | null = null;
+        try {
+          evt = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        const inner = evt.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
+        if (evt.type === "message_update" && inner?.type === "text_delta") {
+          text += typeof inner.delta === "string" ? inner.delta : "";
+        } else if (evt.type === "agent_settled") {
+          finish({ text });
+        } else if (evt.type === "response" && evt.command === "prompt" && evt.success === false) {
+          finish({ text, error: String(evt.error ?? "prompt rejected") });
+        }
+      };
+
+      const timer = setTimeout(
+        () => finish({ text, error: `the agent did not finish within ${Math.round(timeoutMs / 1000)}s` }),
+        timeoutMs,
+      );
+      bridge.onLine(handler);
+      if (!bridge.send({ type: "prompt", message })) finish({ text, error: "could not start the agent" });
+    });
+  }
+
   // --- static ---------------------------------------------------------------
   async function serveStatic(pathname: string, res: ServerResponse): Promise<boolean> {
     const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
@@ -435,6 +495,131 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
       }
       return;
+    }
+
+    // --- assessments: authored, else generated and validated ------------------
+    const assessmentsMatch = /^\/api\/courses\/([^/]+)\/assessments$/.exec(url);
+    if (assessmentsMatch) {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(assessmentsMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${assessmentsMatch[1]}` });
+        return;
+      }
+      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+      const unit = Number(query.get("unit") ?? "1");
+      if (!Number.isFinite(unit) || unit < 1) {
+        sendJson(res, 400, { error: "unit must be a positive number" });
+        return;
+      }
+
+      if (req.method === "GET") {
+        try {
+          const tree = loadCourseTree(ref, readText);
+          const authored = tree.quizzes.filter((q) => q.unit === unit);
+          if (authored.length > 0) {
+            sendJson(res, 200, {
+              unit,
+              source: "authored",
+              items: authored.flatMap((q) => q.items),
+              warnings: tree.warnings.filter((w) => w.startsWith("assessment")),
+            });
+            return;
+          }
+          const cached = readCache(ref.dir, unit);
+          if (cached) {
+            sendJson(res, 200, {
+              unit,
+              source: "cache",
+              generatedAt: cached.generatedAt,
+              items: cached.items,
+              warnings: [],
+            });
+            return;
+          }
+          sendJson(res, 200, { unit, source: "none", items: [], warnings: [] });
+        } catch (err) {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { unit?: unknown; count?: unknown };
+          const wanted = typeof body.unit === "number" ? body.unit : unit;
+          const count = typeof body.count === "number" ? Math.min(Math.max(body.count, 1), 10) : 3;
+          const tree = loadCourseTree(ref, readText);
+
+          // Authored wins: never generate over a hand-written quiz.
+          const authored = tree.quizzes.filter((q) => q.unit === wanted);
+          if (authored.length > 0) {
+            sendJson(res, 200, {
+              unit: wanted,
+              source: "authored",
+              items: authored.flatMap((q) => q.items),
+              warnings: [],
+            });
+            return;
+          }
+
+          const unitTree = tree.units.find((u) => u.n === wanted);
+          if (!unitTree) {
+            sendJson(res, 404, { error: `unit ${wanted} not found in ${ref.id}` });
+            return;
+          }
+
+          const prompt = buildGenerationPrompt({
+            courseTitle: tree.title,
+            unitTitle: unitTree.title,
+            kind: tree.kind,
+            concepts: unitTree.concepts,
+            count,
+          });
+          const turn = await runTurn(ref.dir, prompt);
+          if (turn.error) {
+            sendJson(res, 502, { error: "generation failed", detail: turn.error });
+            return;
+          }
+
+          const extracted = extractItems(turn.text);
+          if (extracted.error) {
+            sendJson(res, 422, {
+              error: "generation did not produce usable items",
+              detail: extracted.error,
+              excerpt: turn.text.slice(0, 400),
+            });
+            return;
+          }
+
+          const { items, errors } = validateItems(extracted.raw, {
+            kind: tree.kind,
+            oracle: courseOracle(ref.dir),
+            prefix: `unit${wanted}-q`,
+          });
+          if (items.length === 0) {
+            sendJson(res, 422, {
+              error: "no generated item passed validation",
+              detail: errors.join("; ") || "the reply contained no items",
+            });
+            return;
+          }
+
+          writeCache(ref.dir, wanted, items, new Date().toISOString());
+          // Rejected items are reported, not hidden: a partly invalid generation is surfaced
+          // rather than quietly rendered as if it were whole.
+          sendJson(res, 200, {
+            unit: wanted,
+            source: "generated",
+            items,
+            rejected: errors,
+            warnings: errors.length > 0 ? [`${errors.length} generated item(s) rejected`] : [],
+          });
+        } catch (err) {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
     }
 
     // --- legacy alias removed in P2 -----------------------------------------
