@@ -1,4 +1,4 @@
-# Mission — Journal Fixture
+# Course With Journal
 
 ## Destination
 

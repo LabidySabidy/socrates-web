@@ -1,4 +1,4 @@
-# Mission — Unknown Badge
+# Course Unknown Badge
 
 ## Destination
 

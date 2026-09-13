@@ -1,4 +1,4 @@
-# Mission — Manifest Override
+# Course Manifest
 
 ## Destination
 

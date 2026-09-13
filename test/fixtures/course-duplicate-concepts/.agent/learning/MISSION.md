@@ -1,4 +1,4 @@
-# Mission — Duplicate Concepts
+# Course Duplicate Concepts
 
 ## Destination
 

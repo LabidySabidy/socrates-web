@@ -146,3 +146,40 @@ export async function createCourseFromSubject(subject: string): Promise<CreateCo
   if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
   return body;
 }
+
+export type RenameResult =
+  | { ok: true; id: string; title: string; renamed: boolean; deferred?: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Rename a course.
+ *
+ * The title is the H1 of MISSION.md — the one place a name lives — and the server derives the rest:
+ * it writes the H1, then reconciles, which moves the directory when the slug changed. A rename asked
+ * for while the tutor is mid-turn is accepted as `deferred`: the agent's cwd IS the course directory
+ * and Windows cannot rename it out from under a live process, so the move lands on settle and the
+ * page is told through the watch channel.
+ */
+export async function renameCourse(id: string, title: string): Promise<RenameResult> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* a non-JSON body is still a failure */
+  }
+  if (!res.ok && res.status !== 202) {
+    return { ok: false, error: typeof body.error === "string" ? body.error : `HTTP ${res.status}` };
+  }
+  return {
+    ok: true,
+    id: typeof body.id === "string" ? body.id : id,
+    title: typeof body.title === "string" ? body.title : title,
+    renamed: body.renamed === true,
+    deferred: body.deferred === true,
+  };
+}

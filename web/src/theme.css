@@ -730,3 +730,36 @@ a.mod:hover { text-decoration: none; }
   background: var(--surface);
   color: var(--ink);
 }
+
+/* The library card's link is only its descriptive half — the title above it is editable, so the card
+   is a container rather than an anchor. */
+.card a.card-open {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* An editable course name. Reads as text until hovered; the caret and the dotted underline are the
+   only affordance, because a course name is prose, not a form field. */
+.editable-title {
+  cursor: text;
+  border-radius: 3px;
+}
+.editable-title:hover {
+  outline: 1px dashed var(--rule);
+  outline-offset: 3px;
+}
+.title-input {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--action);
+  border-radius: 4px;
+  padding: 1px 5px;
+  min-width: 12ch;
+  width: 100%;
+}
+.title-error {
+  display: block;
+  margin-top: 6px;
+}

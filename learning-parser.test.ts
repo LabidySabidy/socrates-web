@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import {
   parseMission,
   parsePlan,
@@ -22,6 +22,55 @@ test("parseMission extracts destination / artifact / driving project", () => {
   assert.equal(m.destination, "trace a render cycle");
   assert.equal(m.artifact, "a PR adding a custom hook");
   assert.equal(m.drivingProject, "slow dashboard");
+});
+
+// ---------------------------------------------------------------------------
+// the title: H1 first, then the destination, then the directory name
+// ---------------------------------------------------------------------------
+
+test("parseMission takes the H1 as the title", () => {
+  const m = parseMission(`# Wheel Alignment by String
+
+## Destination
+
+- **I will be able to:** align a car's front wheels myself
+`);
+  assert.equal(m.title, "Wheel Alignment by String");
+  assert.equal(m.destination, "align a car's front wheels myself", "the goal stays the goal");
+});
+
+test("a course with no H1 falls back to the destination", () => {
+  // Every file before the title existed looks like this, so it must still name itself.
+  const m = parseMission(`
+## Destination
+
+- **I will be able to:** read EXPLAIN ANALYZE output
+`);
+  assert.equal(m.title, "read EXPLAIN ANALYZE output");
+});
+
+test("a legacy \"# Mission — X\" heading parses to X", () => {
+  // The seed used to write this prefix; archives and migrated courses still carry it.
+  const emDash = parseMission("# Mission — Supabase row-level security");
+  assert.equal(emDash.title, "Supabase row-level security");
+  const hyphen = parseMission("# Mission - Postgres indexing");
+  assert.equal(hyphen.title, "Postgres indexing");
+  const colon = parseMission("# Mission: Query plans");
+  assert.equal(colon.title, "Mission: Query plans", "only the em/en dash forms are a prefix");
+});
+
+test("a heading inside a fenced block is not a title", () => {
+  const m = parseMission("```md\n# Not the title\n```\n\n# The Real Title\n");
+  assert.equal(m.title, "The Real Title");
+});
+
+test("parseLearning falls back to the directory name when there is no heading or destination", () => {
+  const dir = mkdtempSync(join(tmpdir(), "soc-title-"));
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(join(dir, ".agent", "learning", "MISSION.md"), "no heading, no destination\n", "utf8");
+  const data = parseLearning(dir);
+  assert.equal(data.mission.title, basename(dir), "the last link of the chain keeps the course listable");
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("parsePlan extracts sequence table + cut list", () => {

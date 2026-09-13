@@ -10,7 +10,7 @@
  * Env overrides (tests): PI_BIN + PI_ARGS — e.g. `PI_BIN=node PI_ARGS=test/mock-pi.mjs`.
  */
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
@@ -186,6 +186,20 @@ export class ProcessBridge {
   kill(): void {
     this.shuttingDown = true;
     this.terminate();
+  }
+
+  /**
+   * Move the course directory the agent is standing in, with the agent out of the way.
+   *
+   * Windows cannot rename a directory that is a live process's cwd, and the agent's cwd IS the course
+   * directory — so a rename has to tear the child down first. This is the same `terminate()` that
+   * `switchCourse` calls, exposed separately because the move has to happen in BETWEEN the teardown and
+   * the respawn: `switchCourse(newDir)` on its own would spawn into a directory that does not exist yet.
+   * The respawn afterwards is `switchCourse`, so there is still one kill/respawn path.
+   */
+  moveCourseDir(from: string, to: string): void {
+    if (resolve(this.cwd) === resolve(from)) this.terminate();
+    renameSync(from, to);
   }
 
   /**

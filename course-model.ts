@@ -291,8 +291,10 @@ export function buildCourse(src: CourseSource): CourseTree {
   if (!present.includes("MISSION.md")) warnings.push(WARN.noMission);
 
   const mission = src.data.mission;
-  const title =
-    mission.destination.trim() || src.manifestText?.match(/^title:\s*(.+)$/m)?.[1]?.trim() || src.id;
+  // The H1 names the course. `mission.title` has already resolved H1 → destination → directory name in
+  // the parser, which is the WHOLE chain: a `title:` in COURSE.md used to be consulted here as a
+  // second source, and that is exactly the display-name-vs-slug split this model removed. One place.
+  const title = mission.title.trim() || src.id;
 
   let units = deriveUnits(src, warnings);
   let quizzes: Quiz[] = [];

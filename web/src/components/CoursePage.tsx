@@ -6,6 +6,7 @@ import { MASTERY_STATES, mastery } from "../severity.ts";
 import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { useCourseWatch } from "../watch.ts";
+import { EditableTitle } from "./EditableTitle.tsx";
 import { grillHref, scaffoldHref } from "../grill.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
@@ -72,6 +73,16 @@ export function CoursePage({
         if (changed === courseId) reload();
       },
       [courseId, reload],
+    ),
+    true,
+    // The directory moved, so this page's id is stale. There is no alias table to redirect through
+    // (deliberately), so the page follows the frame and stays on the unit it was showing.
+    useCallback(
+      (from: string, to: string) => {
+        if (from !== courseId) return;
+        window.location.hash = hrefCourse(to, unitNumber ?? undefined).slice(1);
+      },
+      [courseId, unitNumber],
     ),
   );
 
@@ -174,7 +185,14 @@ export function CoursePage({
           <nav className="crumbs" aria-label="Breadcrumb">
             <a href={hrefHome()}>All courses</a>
             <span aria-hidden="true"> › </span>
-            <span>{current?.label ?? courseId}</span>
+            <EditableTitle
+              courseId={courseId}
+              title={current?.label ?? tree.title ?? courseId}
+              as="span"
+              onRenamed={(_from, to) => {
+                window.location.hash = hrefCourse(to, unitNumber ?? undefined).slice(1);
+              }}
+            />
             {selected ? (
               <>
                 <span aria-hidden="true"> › </span>

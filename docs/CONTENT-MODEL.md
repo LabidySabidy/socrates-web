@@ -172,6 +172,35 @@ tutor session runs in this course."* It never claims a badge moved.
 factor, and no such rule is defined anywhere in this project for a quiz attempt — the tutor's
 telemetry owns those fields. Inventing one here would be a fabricated scheduling rule.
 
+## The name lives in one place
+
+`MISSION.md`'s H1 is the course title — `# Wheel Alignment by String`. Everything else is derived from
+it: the slug, the directory under the store, the URL, and the catalogue entry. There is no separate
+display name, no alias table and no old-id mapping, because each of those exists to preserve a name
+that is not the truth.
+
+The title resolves in this order, so a course always has one:
+
+1. the H1
+2. the `**I will be able to:**` destination
+3. the directory name
+
+A legacy `# Mission — X` heading parses to `X` (courses seeded before titles existed still carry it),
+and a `#` inside a fenced block is not a heading.
+
+**Every route to a new name writes that one line and then reconciles**, which is the only thing in the
+app that renames a directory:
+
+| route | what it writes |
+|---|---|
+| `PATCH /api/courses/:id {title}` | the H1, surgically — the rest of the file is byte-for-byte untouched |
+| the scaffold skill's final step | the H1, but only while it still equals the seeded subject |
+| a hand edit | nothing; the next read reconciles, so the filesystem follows the document |
+
+Reconciliation announces `{type:"renamed", from, to}` on `/api/watch`, which is how an open page learns
+its id is stale and follows. A rename requested while a turn is in flight is deferred to settle: the
+agent's `cwd` IS the course directory, and Windows will not rename a live process's working directory.
+
 ## The store — a course is a subject
 
 A course is created, not discovered. `~/.socrates/courses/<slug>/` is the whole layout, and the slug

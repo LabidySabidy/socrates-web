@@ -1,4 +1,4 @@
-# Mission — Duplicate Misconceptions
+# Course Duplicate Misconceptions
 
 ## Destination
 

@@ -9,7 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, type RunningServer } from "./server.ts";
@@ -232,6 +232,20 @@ test("chat routes are absent when chat is disabled, and health still answers", a
 // ---------------------------------------------------------------------------
 
 /** Boot with chat enabled and the cwd-reporting mock, so a switch is observable. */
+/** Boot with chat enabled against a NAMED mock — settle timing differs per test. */
+async function bootChatWith(t: { after(fn: () => Promise<void> | void): void }, mock: string) {
+  process.env.PI_BIN = "node";
+  process.env.PI_ARGS = join(import.meta.dirname, "test", mock);
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+  const running = await startServer({ port: 0, store: STORE, staticDir, chat: true, watch: true });
+  t.after(async () => {
+    await running.close();
+    rmSync(staticDir, { recursive: true, force: true });
+  });
+  return { base: `http://127.0.0.1:${running.port}` };
+}
+
 async function bootChat(t: { after(fn: () => Promise<void> | void): void }) {
   process.env.PI_BIN = "node";
   process.env.PI_ARGS = join(import.meta.dirname, "test", "mock-pi-cwd.mjs");
@@ -759,4 +773,189 @@ test("the server binds an ephemeral port when asked for 0", async (t) => {
   });
   assert.ok(running.port > 0);
   assert.equal((await fetch(`http://127.0.0.1:${running.port}/health`)).status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// renaming: one writer (the H1), one mover (reconcile), one channel (SSE)
+// ---------------------------------------------------------------------------
+
+/** A course in the store, with a mission that has more than a heading to preserve. */
+function makeTitledCourse(id: string, heading: string, destination = "do the thing"): string {
+  const dir = join(STORE, id);
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    [
+      `# ${heading}`,
+      "",
+      "## Destination",
+      "",
+      `- **I will be able to:** ${destination}`,
+      "- **Proof-of-skill artifact:** a merged PR",
+      "",
+    ].join("\n"),
+  );
+  return dir;
+}
+
+const patchTitle = (base: string, id: string, title: string) =>
+  fetch(`${base}/api/courses/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+
+test("a rename writes the H1, moves the directory, and leaves the rest of the mission alone", async (t) => {
+  const { base } = await boot(t);
+  const id = "rename-me";
+  const dir = makeTitledCourse(id, "rename me", "align my own wheels");
+  const file = join(dir, ".agent", "learning", "MISSION.md");
+  const before = readFileSync(file, "utf8");
+
+  const res = await patchTitle(base, id, "Wheel Alignment by String");
+  const body = (await res.json()) as { id: string; renamed: boolean };
+  assert.equal(res.status, 200);
+  assert.equal(body.renamed, true);
+  assert.equal(body.id, "wheel-alignment-by-string", "the id follows the directory, which follows the H1");
+
+  assert.ok(!existsSync(dir), "the old directory is gone");
+  const moved = join(STORE, "wheel-alignment-by-string");
+  assert.ok(existsSync(moved));
+  const after = readFileSync(join(moved, ".agent", "learning", "MISSION.md"), "utf8");
+  assert.equal(after.split("\n")[0], "# Wheel Alignment by String");
+  assert.equal(
+    after.split("\n").slice(1).join("\n"),
+    before.split("\n").slice(1).join("\n"),
+    "every other byte of MISSION.md survives the rename",
+  );
+
+  rmSync(moved, { recursive: true, force: true });
+});
+
+test("a rename onto an existing course is refused and touches neither of them", async (t) => {
+  const { base } = await boot(t);
+  const a = makeTitledCourse("keeper", "keeper");
+  const b = makeTitledCourse("mover", "mover");
+  const bBefore = readFileSync(join(b, ".agent", "learning", "MISSION.md"), "utf8");
+
+  const res = await patchTitle(base, "mover", "keeper");
+  assert.equal(res.status, 409, "a collision is refused, not clobbered");
+  const body = (await res.json()) as { error: string; id: string };
+  assert.match(body.error, /already exists/);
+  assert.equal(body.id, "mover");
+
+  assert.ok(existsSync(a), "the course being protected is untouched");
+  assert.ok(existsSync(b), "the course that tried to move has not moved");
+  assert.equal(
+    readFileSync(join(b, ".agent", "learning", "MISSION.md"), "utf8"),
+    bBefore,
+    "a refused rename leaves the old name written nowhere new",
+  );
+  // and the catalogue still lists it under the old name
+  const listed = (await (await fetch(`${base}/api/courses`)).json()) as { courses: { id: string }[] };
+  assert.ok(listed.courses.some((c) => c.id === "mover"));
+  rmSync(a, { recursive: true, force: true });
+  rmSync(b, { recursive: true, force: true });
+});
+
+test("an empty or oversized title is refused with a reason and no move", async (t) => {
+  const { base } = await boot(t);
+  const dir = makeTitledCourse("validate-me", "validate me");
+
+  const empty = await patchTitle(base, "validate-me", "   ");
+  assert.equal(empty.status, 400);
+  assert.match(((await empty.json()) as { error: string }).error, /required/);
+
+  const long = await patchTitle(base, "validate-me", "y".repeat(200));
+  assert.equal(long.status, 400);
+  assert.match(((await long.json()) as { error: string }).error, /limit is 80/);
+
+  assert.ok(existsSync(dir), "a refused title never moves anything");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a hand-edited H1 renames the course on the next read", async (t) => {
+  const { base } = await boot(t);
+  const dir = makeTitledCourse("hand-edited", "hand edited");
+  // exactly what a learner with an editor would do
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    `# Thrust Angle Geometry\n\n## Destination\n\n- **I will be able to:** set toe and camber\n`,
+  );
+
+  const res = await fetch(`${base}/api/courses/hand-edited`);
+  assert.equal(res.status, 404, "the request was for the old id, and there is no alias table");
+  assert.ok(existsSync(join(STORE, "thrust-angle-geometry")), "the filesystem followed the document");
+  assert.ok(!existsSync(dir));
+
+  const tree = (await (await fetch(`${base}/api/courses/thrust-angle-geometry`)).json()) as { title: string };
+  assert.equal(tree.title, "Thrust Angle Geometry");
+  rmSync(join(STORE, "thrust-angle-geometry"), { recursive: true, force: true });
+});
+
+test("the watch channel announces a rename with from and to", async (t) => {
+  const { base } = await boot(t);
+  const dir = makeTitledCourse("announce-me", "announce me");
+
+  const controller = new AbortController();
+  const stream = await fetch(`${base}/api/watch`, { signal: controller.signal });
+  const reader = stream.body!.getReader();
+  const decoder = new TextDecoder();
+  const frames: string[] = [];
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        decoder.decode(value).split("\n\n").forEach((f) => f.trim() && frames.push(f));
+      }
+    } catch {
+      /* aborted at the end of the test */
+    }
+  })();
+
+  await patchTitle(base, "announce-me", "Announced Rename");
+  await new Promise((r) => setTimeout(r, 150));
+  controller.abort();
+  await pump;
+
+  const renamed = frames.map((f) => f.replace(/^data: /, "")).find((f) => f.includes("renamed"));
+  assert.ok(renamed, `expected a renamed frame; saw ${JSON.stringify(frames)}`);
+  assert.deepEqual(JSON.parse(renamed!), { type: "renamed", from: "announce-me", to: "announced-rename" });
+  rmSync(join(STORE, "announced-rename"), { recursive: true, force: true });
+});
+
+test("a rename during a turn is deferred, and lands once the agent settles", async (t) => {
+  // The agent's cwd IS the course directory, and Windows cannot rename it out from under a live
+  // process — so the move waits for the turn to finish rather than breaking it.
+  process.env.MOCK_SETTLE_MS = "1200";
+  const { base } = await bootChatWith(t, "mock-pi-slow.mjs");
+  const id = "busy-course";
+  const dir = makeTitledCourse(id, "busy course");
+
+  const turn = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "start the interview", course: id }),
+  });
+  assert.equal(turn.status, 200);
+
+  const res = await patchTitle(base, id, "Deferred Rename");
+  assert.equal(res.status, 202, "the rename is accepted but not applied");
+  const body = (await res.json()) as { deferred: boolean; pending: { title: string } };
+  assert.equal(body.deferred, true);
+  assert.equal(body.pending.title, "Deferred Rename");
+  assert.ok(existsSync(dir), "nothing moved while the agent was standing in the directory");
+
+  // the turn settles, and the deferred rename lands on the settle without anyone prompting it
+  await new Promise((r) => setTimeout(r, 1800));
+  assert.ok(existsSync(join(STORE, "deferred-rename")), "the move landed after settle");
+  assert.ok(!existsSync(dir));
+  assert.equal(
+    readFileSync(join(STORE, "deferred-rename", ".agent", "learning", "MISSION.md"), "utf8").split("\n")[0],
+    "# Deferred Rename",
+  );
+  // No rmSync here on purpose: the agent was respawned IN this directory, and Windows refuses to
+  // remove a directory a live process is standing in. The suite's own teardown runs after every
+  // server has been closed, which is when the child is actually gone.
 });

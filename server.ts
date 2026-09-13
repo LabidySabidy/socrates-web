@@ -19,14 +19,26 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
-import { courseRefs, createCourse, findCourse, storeRoot, type CourseRef } from "./course-store.ts";
+import {
+  courseRefs,
+  courseDir,
+  createCourse,
+  findCourse,
+  reconcileCourse,
+  slugifySubject,
+  storeRoot,
+  validateTitle,
+  writeMissionTitle,
+  TITLE_MAX,
+  type CourseRef,
+} from "./course-store.ts";
 import {
   awardedBadge,
   badgeState,
@@ -150,6 +162,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
    */
   const host = opts.host ?? process.env.HOST ?? "127.0.0.1";
   const store = opts.store ?? storeRoot();
+  /**
+   * The store helpers take an ENV, not a resolved path — `opts.store` is the directory the agent
+   * starts in. Deriving the env from it (rather than re-reading `process.env` at each call site) is
+   * what keeps a test's redirected store and the server's own view of it the same store.
+   */
+  const storeEnv: NodeJS.ProcessEnv = { ...process.env, SOCRATES_HOME: store };
   const publicDir =
     opts.staticDir ??
     opts.publicDir ??
@@ -203,6 +221,17 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
    * occupy that slot, and must not be starved of updates because a turn is open elsewhere.
    */
   const watchStreams = new Set<ServerResponse>();
+  /**
+   * A course whose directory is waiting to be made to match its document.
+   *
+   * Windows cannot rename a live process's cwd and the agent's cwd IS the course directory, so a
+   * rename while a turn is in flight is DEFERRED rather than forced — breaking a running turn to
+   * rename a folder would be a worse bug than a name that lands a few seconds late. It is flushed on
+   * settle, and only the most recent request is kept because the reconcile re-reads the H1 anyway.
+   */
+  let pendingReconcile: string | null = null;
+  /** The title a deferred rename was asked for, applied at the same moment the move runs. */
+  let pendingTitle: string | null = null;
   const bridge = new ProcessBridge(store);
 
   function finalize(kind: "done" | "error", detail?: unknown): void {
@@ -259,6 +288,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       if (evt?.type === "agent_settled") {
         bridge.markIdle();
         finalize("done");
+        flushPending();
       } else if (evt?.type === "response" && evt.command === "prompt" && evt.success === false) {
         finalize("error", evt.error);
       }
@@ -283,6 +313,94 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     watchers = [];
     for (const t of watchTimers.values()) clearTimeout(t);
     watchTimers = new Map();
+  }
+
+  /**
+   * Announce a course rename on the existing watch channel.
+   *
+   * There is no alias table and no old-id mapping (deliberately — that machinery exists to preserve a
+   * name that is not the truth), so an open page has to FOLLOW the rename rather than be redirected
+   * later. `from`/`to` are course ids, i.e. the slugs, which are also the directory names.
+   */
+  function pushRenamed(from: string, to: string): void {
+    const frame = `data: ${JSON.stringify({ type: "renamed", from, to })}\n\n`;
+    for (const res of watchStreams) {
+      try {
+        res.write(frame);
+      } catch {
+        watchStreams.delete(res);
+      }
+    }
+  }
+
+  /**
+   * The ONE step that makes the filesystem agree with MISSION.md.
+   *
+   * Called from every path that can change the H1 — a UI rename, the skill writing its title, or a hand
+   * edit seen on the next read — so there is exactly one writer and one mover. Renaming the ACTIVE
+   * course goes through the bridge: `moveCourseDir` tears the child down with the same `terminate()`
+   * `switchCourse` uses, the move runs with the directory free, and `switchCourse` respawns in the new
+   * one. A rename requested while a turn is in flight is deferred to keep that turn alive.
+   */
+  /**
+   * Apply a rename that was deferred because a turn was in flight. Called on settle and before a read,
+   * so the deferred name lands as soon as the agent stops rather than waiting for the learner to act.
+   */
+  function flushPending(): void {
+    const id = pendingReconcile;
+    if (!id || bridge.isBusy) return;
+    pendingReconcile = null;
+    const title = pendingTitle;
+    pendingTitle = null;
+    const ref = findCourse(discover(), id);
+    if (!ref) return;
+    if (title) {
+      const wrote = writeMissionTitle(ref.dir, title);
+      if (!wrote.ok) {
+        console.error(`[rename] deferred title write failed: ${wrote.error}`);
+        return;
+      }
+    }
+    reconcile(id);
+  }
+
+  function reconcile(id: string): {
+    ok: boolean;
+    id: string;
+    renamed?: boolean;
+    deferred?: boolean;
+    error?: string;
+  } {
+    const ref = findCourse(discover(), id);
+    if (!ref) return { ok: false, id, error: `unknown course: ${id}` };
+    if (bridge.isBusy) {
+      pendingReconcile = id;
+      return { ok: true, id, deferred: true };
+    }
+
+    const active = resolve(bridge.courseDir) === resolve(ref.dir);
+    // Read the wanted slug BEFORE moving, so the collision is refused with nothing touched.
+    const wanted = slugifySubject(parseLearning(ref.dir).mission.title);
+    if (wanted && wanted !== id && existsSync(courseDir(wanted, storeEnv))) {
+      return { ok: false, id, error: `a course called "${wanted}" already exists — pick a different title` };
+    }
+
+    let result;
+    if (active && wanted && wanted !== id) {
+      const toDir = courseDir(wanted, storeEnv);
+      bridge.moveCourseDir(ref.dir, toDir);
+      result = { ok: true as const, renamed: true as const, id: wanted, dir: toDir, from: id, to: wanted, fromDir: ref.dir };
+      bridge.switchCourse(toDir);
+      if (turnCourse === id) turnCourse = wanted;
+    } else {
+      result = reconcileCourse(id, storeEnv);
+    }
+    if (!result.ok) return { ok: false, id, error: result.error };
+    if (result.renamed) {
+      console.log(`[rename] ${result.from} -> ${result.to}`);
+      pushRenamed(result.from, result.to);
+    }
+    return { ok: true, id: result.id, renamed: result.renamed };
   }
 
   function pushReload(courseId: string): void {
@@ -467,7 +585,72 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
 
     const courseMatch = /^\/api\/courses\/([^/]+)$/.exec(url);
+    // Rename: the H1 changes, then the ONE reconcile step moves the directory to match it.
+    if (courseMatch && req.method === "PATCH") {
+      const id = decodeURIComponent(courseMatch[1]);
+      const ref = findCourse(discover(), id);
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${id}` });
+        return;
+      }
+      let body: { title?: unknown };
+      try {
+        body = JSON.parse((await readBody(req)) || "{}") as { title?: unknown };
+      } catch {
+        sendJson(res, 400, { error: "body must be JSON" });
+        return;
+      }
+      if (typeof body.title !== "string") {
+        sendJson(res, 400, { error: "title is required", maxLength: TITLE_MAX });
+        return;
+      }
+      const valid = validateTitle(body.title);
+      if (!valid.ok) {
+        sendJson(res, 400, { error: valid.error, maxLength: TITLE_MAX });
+        return;
+      }
+
+      // Collision is checked BEFORE anything is written, so a refusal leaves the old name and the old
+      // directory exactly as they were rather than half-applied.
+      const wanted = slugifySubject(valid.clean);
+      if (wanted !== ref.id && existsSync(courseDir(wanted, storeEnv))) {
+        sendJson(res, 409, {
+          error: `a course called "${wanted}" already exists — pick a different title`,
+          id: ref.id,
+        });
+        return;
+      }
+      if (bridge.isBusy) {
+        // Never rename under a live agent (Windows cannot move its cwd). Defer, and say so.
+        pendingReconcile = ref.id;
+        pendingTitle = valid.clean;
+        sendJson(res, 202, { deferred: true, id: ref.id, pending: { title: valid.clean } });
+        return;
+      }
+
+      const previous = readText(join(ref.dir, ".agent", "learning", "MISSION.md")) ?? "";
+      const wrote = writeMissionTitle(ref.dir, valid.clean);
+      if (!wrote.ok) {
+        sendJson(res, 500, { error: wrote.error });
+        return;
+      }
+      const moved = reconcile(ref.id);
+      if (!moved.ok) {
+        // The H1 was written and the move failed, so put the document back rather than leave the name
+        // and the directory disagreeing — a state the next read would keep trying to repair.
+        writeFileSync(join(ref.dir, ".agent", "learning", "MISSION.md"), previous, "utf8");
+        sendJson(res, 409, { error: moved.error, id: ref.id });
+        return;
+      }
+      sendJson(res, 200, { id: moved.id, title: valid.clean, renamed: moved.renamed === true, from: ref.id });
+      return;
+    }
+
     if (courseMatch && req.method === "GET") {
+      // D3: a hand-edited H1 renames the course on the next read, so a read reconciles first. A course
+      // whose document disagrees with its directory moves; every other read is a slug compare.
+      flushPending();
+      reconcile(decodeURIComponent(courseMatch[1]));
       const result = discover();
       const ref = findCourse(result, decodeURIComponent(courseMatch[1]));
       if (!ref) {

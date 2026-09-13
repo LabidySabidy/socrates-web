@@ -1,4 +1,4 @@
-# Mission — Lab Fixture
+# Course Lab
 
 ## Destination
 

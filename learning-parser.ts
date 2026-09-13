@@ -4,7 +4,7 @@
  * .agent/learning/ directory and returns one structured, JSON-serializable object.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 export type Badge = "⬜" | "🟥" | "🟨" | "🟩" | "🟦";
 
@@ -97,6 +97,15 @@ export interface SequenceItem {
 }
 
 export interface Mission {
+  /**
+   * The course NAME — the H1, which is the one place a title lives. Everything else the app shows or
+   * navigates by (slug, directory, URL, catalogue) is derived from it.
+   *
+   * Resolution order is H1 → destination → directory name; `parseMission` can only see the first two,
+   * so `parseLearning` applies the directory fallback and the chain is complete by the time anything
+   * reads `mission.title`.
+   */
+  title: string;
   destination: string;
   artifact: string;
   drivingProject: string;
@@ -167,11 +176,37 @@ export function parseMission(text: string): Mission {
     }
     return "";
   };
+  const destination = grab("I will be able to:");
   return {
-    destination: grab("I will be able to:"),
+    // The H1, or "" so the caller can fall back. Only a REAL heading counts: `#` inside a fenced
+    // block or a `#hashtag` at line start must not become a course name.
+    title: grabTitle(text) || destination,
+    destination,
     artifact: grab("Proof-of-skill artifact:"),
     drivingProject: grab("Driving project / pain:"),
   };
+}
+
+/**
+ * The first ATX H1 in the document, with the legacy `Mission — ` prefix stripped.
+ *
+ * Courses created before the title existed were seeded as `# Mission — <subject>`; those files are on
+ * disk in archives and on other machines, so the prefix is dropped rather than allowed to leak into a
+ * course name (and therefore into a directory name).
+ */
+export function grabTitle(text: string): string {
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const m = /^#\s+(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    return m[1].replace(/^Mission\s+[\u2014\u2013-]\s*/i, "").trim();
+  }
+  return "";
 }
 
 export function parsePlan(text: string): Plan {
@@ -269,10 +304,14 @@ export function parseSchema(text: string): {
 export function parseLearning(projectDir: string): LearningData {
   const dir = join(projectDir, ".agent", "learning");
   const present = FILE_NAMES.filter((n) => existsSync(join(dir, n)));
+  const mission = parseMission(read(dir, "MISSION.md"));
+  // The last link of the fallback chain. `parseMission` is pure text and cannot know the directory,
+  // so a course with no H1 and no destination still lists by the name of the folder it lives in.
+  if (!mission.title) mission.title = basename(projectDir);
   return {
     projectDir,
     present,
-    mission: parseMission(read(dir, "MISSION.md")),
+    mission,
     plan: parsePlan(read(dir, "PLAN.md")),
     schema: parseSchema(read(dir, "SCHEMA.md")),
   };

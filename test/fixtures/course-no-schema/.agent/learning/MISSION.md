@@ -1,4 +1,4 @@
-# Mission — No Schema
+# Course No Schema
 
 ## Destination
 

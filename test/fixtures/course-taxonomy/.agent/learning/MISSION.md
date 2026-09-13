@@ -1,4 +1,4 @@
-# Mission — Taxonomy Fixture
+# Course Taxonomy
 
 ## Destination
 

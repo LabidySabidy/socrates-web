@@ -16,6 +16,7 @@ import { MasteryRing } from "./MasteryRing.tsx";
 import { ContinueStrip } from "./ContinueStrip.tsx";
 import { ManageCourses } from "./ManageCourses.tsx";
 import { hrefCourse } from "../router.ts";
+import { EditableTitle } from "./EditableTitle.tsx";
 import { filterCourses, totalMasteryCounts } from "../select.ts";
 
 function greeting(now = new Date()): string {
@@ -150,7 +151,10 @@ export function HomePage({
           ) : (
             <div className="grid">
               {filtered.map((course) => (
-                <a className="card" key={course.id} href={hrefCourse(course.id)}>
+                // Not an <a> around everything any more: the title is now editable, and an input
+                // inside a link is both invalid markup and impossible to click. The link keeps opening
+                // the course; the title is the rename affordance.
+                <div className="card" key={course.id}>
                   <div className="card-head">
                     <MasteryRing
                       mastery={mastery(aggregateState(course))}
@@ -159,19 +163,29 @@ export function HomePage({
                       label={`${course.label}: ${aggregateState(course)}`}
                     />
                   </div>
-                  <h2 className="name">{course.label}</h2>
-                  <p className="desc">
-                    {course.concepts === 0
-                      ? "Started, but not scaffolded yet — the tutor writes the concept cards with you."
-                      : `${course.concepts} concept${course.concepts === 1 ? "" : "s"}`}
-                  </p>
-                  <div className="footer">
-                    {course.concepts === 0
-                      ? "Not scaffolded yet"
-                      : `${course.concepts} unit${course.concepts === 1 ? "" : "s"}`}
-                    {course.sessions.count > 0 ? ` · ${course.sessions.count} session${course.sessions.count === 1 ? "" : "s"}` : ""}
-                  </div>
-                </a>
+                  <EditableTitle
+                    courseId={course.id}
+                    title={course.label}
+                    as="h2"
+                    className="name"
+                    onRenamed={() => onChanged()}
+                  />
+                  <a className="card-open" href={hrefCourse(course.id)}>
+                    <p className="desc">
+                      {course.concepts === 0
+                        ? "Started, but not scaffolded yet — the tutor writes the concept cards with you."
+                        : `${course.concepts} concept${course.concepts === 1 ? "" : "s"}`}
+                    </p>
+                    <div className="footer">
+                      {course.concepts === 0
+                        ? "Not scaffolded yet"
+                        : `${course.concepts} unit${course.concepts === 1 ? "" : "s"}`}
+                      {course.sessions.count > 0
+                        ? ` · ${course.sessions.count} session${course.sessions.count === 1 ? "" : "s"}`
+                        : ""}
+                    </div>
+                  </a>
+                </div>
               ))}
             </div>
           )}

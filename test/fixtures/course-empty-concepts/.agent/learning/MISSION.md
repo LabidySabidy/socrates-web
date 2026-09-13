@@ -1,4 +1,4 @@
-# Mission — Empty Concepts
+# Course Empty Concepts
 
 ## Destination
 

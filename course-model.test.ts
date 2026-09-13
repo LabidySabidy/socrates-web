@@ -86,7 +86,12 @@ test("derives one unit per concept card, with derived study modules", () => {
 
   assert.equal(course.warnings.length, 0, `unexpected warnings: ${course.warnings}`);
   assert.equal(course.derived, true);
-  assert.equal(course.title, "derive a course tree from learning markdown without inventing data");
+  // The H1 is the name; the goal sentence lives in the mission and is not the title any more.
+  assert.equal(course.title, "Course Basic");
+  assert.equal(
+    course.mission.destination,
+    "derive a course tree from learning markdown without inventing data",
+  );
 
   assert.deepEqual(course.units.map((u) => u.title), ["alpha-one", "beta-two", "gamma-three"]);
   assert.deepEqual(course.units.map((u) => u.mastery.state), ["Familiar", "Proficient", "Not started"]);
@@ -117,7 +122,7 @@ test("missing SCHEMA.md still renders the mission, with a warning", () => {
   const course = buildCourse(load("course-no-schema"));
   assert.ok(course.warnings.includes("no-schema"));
   assert.equal(course.units.length, 0);
-  assert.equal(course.title, "still see the mission when SCHEMA.md is absent");
+  assert.equal(course.title, "Course No Schema", "the H1 names the course");
   assert.equal(course.mission.destination, "still see the mission when SCHEMA.md is absent");
   assert.ok(course.warnings.includes("no-concepts"));
 });

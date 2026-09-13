@@ -22,6 +22,7 @@ import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText } from "./t
 import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.ts";
 import { completionView } from "./completion.ts";
 import { compile, sample } from "./expr.ts";
+import { parseWatchFrame } from "./watch.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
@@ -1173,4 +1174,30 @@ test("a non-JSON error frame is shown as it arrived, not swallowed", () => {
   assert.equal(streamErrorText("[ERROR] boom"), "boom");
   assert.equal(streamErrorText('[ERROR] {"error": 42}'), '{"error": 42}');
   assert.equal(streamErrorText("[ERROR]"), "the turn failed with no message");
+});
+
+// ---------------------------------------------------------------------------
+// the watch channel: a rename is how a page learns its id is stale
+// ---------------------------------------------------------------------------
+
+test("a renamed frame carries from and to, so an open page can follow it", () => {
+  // Without this frame the page keeps requesting an id whose directory no longer exists. There is no
+  // alias table by design, so following the frame is the only thing that keeps it on the course.
+  assert.deepEqual(parseWatchFrame('{"type":"renamed","from":"old-name","to":"Wheel Alignment"}'), {
+    kind: "renamed",
+    from: "old-name",
+    to: "Wheel Alignment",
+  });
+});
+
+test("a reload frame still works, and anything else is ignored rather than guessed at", () => {
+  assert.deepEqual(parseWatchFrame('{"type":"reload","course":"driftscout"}'), {
+    kind: "reload",
+    course: "driftscout",
+  });
+  // A half-formed rename must not be acted on: moving a page to `undefined` is worse than staying put.
+  assert.equal(parseWatchFrame('{"type":"renamed","from":"only-a-from"}').kind, "other");
+  assert.equal(parseWatchFrame('{"type":"renamed","to":"only-a-to"}').kind, "other");
+  assert.equal(parseWatchFrame(": heartbeat").kind, "other");
+  assert.equal(parseWatchFrame("not json at all").kind, "other");
 });

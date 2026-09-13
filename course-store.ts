@@ -10,7 +10,7 @@
  * words — the course is then real and titled immediately — and the UI dispatches
  * `/skill:scaffold-learning`, which interviews the learner and fills in the rest.
  */
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseLearning } from "./learning-parser.ts";
@@ -84,7 +84,7 @@ export function listCourses(env: NodeJS.ProcessEnv = process.env): StoredCourse[
     let masteryCounts: Record<string, number> = countByMastery([]);
     try {
       const data = parseLearning(dir);
-      title = data.mission.destination.trim() || name;
+      title = data.mission.title.trim() || name;
       // Unique by slug, so the catalogue agrees with the unit count the course page renders.
       const seen = new Map<string, string>();
       for (const c of data.schema.concepts) if (!seen.has(slug(c.name))) seen.set(slug(c.name), c.badge);
@@ -129,9 +129,13 @@ export type CreateResult = { ok: true; id: string; dir: string } | { ok: false; 
 /**
  * Start a course from a subject.
  *
- * The subject is the learner's own words and becomes the seeded mission destination. Nothing is
- * invented: the fields the interview will fill are marked as pending rather than guessed, so the
- * course reads honestly before the tutor has spoken to the learner.
+ * The subject is the learner's own words and is written to BOTH places at birth: the H1 becomes the
+ * course title (and therefore the directory, the URL and the catalogue name) and the destination
+ * carries the same words until the interview replaces them. They are separate from that point on —
+ * the skill proposes an elegant H1, the learner can edit it, and the destination stays the goal.
+ *
+ * Nothing is invented: the fields the interview will fill are marked as pending rather than guessed,
+ * so the course reads honestly before the tutor has spoken to the learner.
  */
 export function createCourse(subject: string, env: NodeJS.ProcessEnv = process.env): CreateResult {
   const clean = subject.trim();
@@ -144,9 +148,9 @@ export function createCourse(subject: string, env: NodeJS.ProcessEnv = process.e
   if (existsSync(learningDir(dir))) return { ok: false, error: `a course called "${id}" already exists` };
 
   const mission = [
-    `# Mission — ${clean}`,
+    `# ${clean}`,
     "",
-    "> Started by the learner. The tutor interviews them and completes this file; the subject below is",
+    "> Started by the learner. The tutor interviews them and completes this file; the title above is",
     "> the learner's own words, and the remaining fields are pending that conversation.",
     "",
     "## Destination",
@@ -164,4 +168,115 @@ export function createCourse(subject: string, env: NodeJS.ProcessEnv = process.e
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// The name lives in ONE place, and everything else follows it
+// ---------------------------------------------------------------------------
+
+/**
+ * A title long enough to read, short enough that the derivation stays predictable.
+ *
+ * The slug truncates at 64 characters, so a title beyond this would be given a directory name that no
+ * longer matches the words the learner typed — the silent truncation this bound exists to prevent. The
+ * API refuses the title and says which limit was hit rather than mangling it.
+ */
+export const TITLE_MAX = 80;
+
+/** Every reason a proposed title is refused, in the order a learner would hit them. */
+export function validateTitle(title: string): { ok: true; clean: string } | { ok: false; error: string } {
+  const clean = title.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return { ok: false, error: "a title is required" };
+  if (clean.length > TITLE_MAX) {
+    return {
+      ok: false,
+      error: `that title is ${clean.length} characters; the limit is ${TITLE_MAX} so the course name and its directory stay in step`,
+    };
+  }
+  if (!slugifySubject(clean)) {
+    return { ok: false, error: `that title has no usable letters or digits: ${JSON.stringify(title)}` };
+  }
+  return { ok: true, clean };
+}
+
+/**
+ * Write the H1 of MISSION.md, touching nothing else.
+ *
+ * Surgical on purpose: the mission holds the destination, the artifact and the driving project, all of
+ * which the tutor and the learner have edited together. Replacing the first ATX H1 in place — or
+ * prepending one — keeps every other byte of the file exactly as it was.
+ */
+export function writeMissionTitle(dir: string, title: string): { ok: true } | { ok: false; error: string } {
+  const file = join(learningDir(dir), "MISSION.md");
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return { ok: false, error: "this course has no MISSION.md to title" };
+  }
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  let fenced = false;
+  let replaced = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    if (/^#\s+/.test(lines[i])) {
+      lines[i] = `# ${title}`;
+      replaced = true;
+      break;
+    }
+  }
+  const next = replaced ? lines.join(eol) : [`# ${title}`, "", ...lines].join(eol);
+  try {
+    writeFileSync(file, next, "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export type ReconcileResult =
+  | { ok: true; renamed: false; id: string; dir: string }
+  | { ok: true; renamed: true; id: string; dir: string; from: string; to: string; fromDir: string }
+  | { ok: false; error: string };
+
+/**
+ * Make the filesystem agree with the document.
+ *
+ * The H1 is the name; the directory is derived from it. Whenever those disagree — a UI rename, the
+ * skill's title, or a hand-edited H1 — this is the ONE step that moves the directory, and it is the
+ * only thing in the app that ever renames a course.
+ *
+ * The caller must have already taken the agent out of the way (`ProcessBridge.moveCourseDir`): a live
+ * process's cwd cannot be renamed on Windows.
+ */
+export function reconcileCourse(id: string, env: NodeJS.ProcessEnv = process.env): ReconcileResult {
+  const fromDir = courseDir(id, env);
+  if (!isDir(learningDir(fromDir))) return { ok: false, error: `unknown course: ${id}` };
+
+  const data = parseLearning(fromDir);
+  const wanted = data.mission.title.trim();
+  if (!wanted) return { ok: false, error: "this course has no title to reconcile" };
+
+  const to = slugifySubject(wanted);
+  if (!to) return { ok: false, error: `the title has no usable letters or digits: ${JSON.stringify(wanted)}` };
+  if (to === id) return { ok: true, renamed: false, id, dir: fromDir };
+
+  const toDir = courseDir(to, env);
+  if (existsSync(toDir)) {
+    // Never clobber. Naming the collision is what lets the learner choose a different title.
+    return { ok: false, error: `a course called "${to}" already exists — pick a different title` };
+  }
+
+  try {
+    mkdirSync(storeRoot(env), { recursive: true });
+    renameSync(fromDir, toDir);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, renamed: true, id: to, dir: toDir, from: id, to, fromDir };
 }
