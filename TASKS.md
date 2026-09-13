@@ -346,9 +346,20 @@
       **Bug found while verifying:** the strip wrote the COURSE route, so the URL described a different screen
       than the one displayed — it only survived because `replaceState` does not re-route, and a refresh would
       have landed on the course page.
-- [ ] **T-047** Sprint rest gate (PORT the mechanic, REDESIGN the visual). **Done when:** a gate token inside
+- [x] **T-047** Sprint rest gate (PORT the mechanic, REDESIGN the visual). **Done when:** a gate token inside
       the stream freezes the composer, suppresses the rest of that turn, runs a 5:00 client-side countdown
       with no backend state, and unfreezes at zero.
+      **Done** — `web/src/restgate.ts` (the three tokens, `splitAtGate`, `formatCountdown`, `isFrozen`) plus the
+      gate in `LessonPage`. Mechanic ported: same tokens, same "everything from the token onward is suppressed",
+      same frozen composer, same 5:00 client-side countdown, no backend state. Visual REDESIGNED to the app's
+      existing dialog treatment — the original `rgba(17,17,17,0.55)` overlay is not reproduced and **no
+      `backdrop-filter` was added** (it never had one). Copy ported verbatim.
+      **Browser-verified with a real turn:** the token opened the gate, the token did NOT appear in the prose,
+      the composer was disabled with the button reading "Resting…", the countdown ran 04:08 → 03:59 → 03:56 →
+      03:54 at one second per tick, and **after it expired the gate closed and the composer re-enabled** (waited
+      out in full rather than inferred).
+      **Robustness fix:** the original tested each `text_delta` in isolation, so a token split across two chunks
+      was missed. Detection now runs over the accumulated prose; a test covers the straddling case.
 - [ ] **T-048** Passivity intercept as a real gate (REDESIGN — behaviour change). **Done when:** after the
       tutor's `PASSIVITY` notify, a passive draft cannot be submitted, a real explanation can, and sending one
       clears the intercept.

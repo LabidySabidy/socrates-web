@@ -41,6 +41,13 @@ import {
 } from "./quiz.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
 import { grillHref, grillPrompt, isGrillPrompt, parseAsk } from "./grill.ts";
+import {
+  findGateToken,
+  formatCountdown,
+  isFrozen,
+  REST_SECONDS,
+  splitAtGate,
+} from "./restgate.ts";
 import { parseHash } from "./router.ts";
 import type { CourseRef, LearningData, Misconception } from "./types.ts";
 
@@ -979,4 +986,56 @@ test("an empty or absent ask is null, never an empty prompt", () => {
   assert.equal(parseAsk("#/lesson/x/1?ask="), null);
   assert.equal(parseAsk("#/lesson/x/1?ask=%20%20"), null);
   assert.equal(parseAsk("#/lesson/x/1?other=1&ask=hi"), "hi");
+});
+
+// ---------------------------------------------------------------------------
+// P10 — the sprint rest gate
+// ---------------------------------------------------------------------------
+
+test("all three gate tokens are recognised, and the earliest one wins", () => {
+  // Ported from app.js:25 — GATE_TOKENS verbatim.
+  assert.equal(findGateToken("blah COGNITIVE SPRINT GATE blah"), "COGNITIVE SPRINT GATE");
+  assert.equal(findGateToken("blah SPRINT_GATE blah"), "SPRINT_GATE");
+  assert.equal(findGateToken("blah SPRINT GATE blah"), "SPRINT GATE");
+  assert.equal(findGateToken("nothing here"), null);
+  assert.equal(findGateToken(""), null);
+  assert.equal(findGateToken("SPRINT GATE then SPRINT_GATE"), "SPRINT GATE", "earliest wins");
+});
+
+test("the token is a control signal: everything from it onward is suppressed", () => {
+  const split = splitAtGate("Here is your question.\n\nSPRINT_GATE\n\nTake a break, you have earned it.");
+  assert.equal(split.token, "SPRINT_GATE");
+  assert.equal(split.prose, "Here is your question.", "the gate copy is never shown as prose");
+  assert.equal(split.prose.includes("Take a break"), false);
+
+  const clean = splitAtGate("just an answer");
+  assert.equal(clean.token, null);
+  assert.equal(clean.prose, "just an answer", "no token means no truncation");
+});
+
+test("a token straddling two deltas is still caught", () => {
+  // The original tested each delta in isolation, so `SPRINT_GATE` split across chunks was missed.
+  let t = emptyTurn();
+  t = reduceTurn(t, { type: "text_delta", delta: "answer\n\nSPRI" });
+  t = reduceTurn(t, { type: "text_delta", delta: "NT_GATE\n\nrest now" });
+  const split = splitAtGate(splitTurn(t).prose);
+  assert.equal(split.token, "SPRINT_GATE");
+  assert.equal(split.prose, "answer");
+});
+
+test("the countdown formats as mm:ss, the way the original did", () => {
+  assert.equal(formatCountdown(300), "05:00");
+  assert.equal(formatCountdown(299), "04:59");
+  assert.equal(formatCountdown(60), "01:00");
+  assert.equal(formatCountdown(0), "00:00");
+  assert.equal(formatCountdown(-5), "00:00", "never negative");
+  assert.equal(formatCountdown(9), "00:09");
+});
+
+test("the gate freezes the composer for the whole countdown, then releases it", () => {
+  assert.equal(isFrozen(true, 300), true);
+  assert.equal(isFrozen(true, 1), true);
+  assert.equal(isFrozen(true, 0), false, "released exactly at zero");
+  assert.equal(isFrozen(false, 300), false, "an unopened gate freezes nothing");
+  assert.equal(REST_SECONDS, 300, "five minutes, as the original hard-coded");
 });

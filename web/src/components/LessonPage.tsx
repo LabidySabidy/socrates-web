@@ -14,6 +14,14 @@ import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefLesson } from "../router.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, type TurnState } from "../turn.ts";
+import {
+  formatCountdown,
+  isFrozen,
+  REST_BODY,
+  REST_HEADING,
+  REST_SECONDS,
+  splitAtGate,
+} from "../restgate.ts";
 
 interface ChatResponse {
   accepted?: boolean;
@@ -39,6 +47,10 @@ export function LessonPage({
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** The sprint gate: 300 seconds of frozen composer, no backend state. */
+  const [gateOpen, setGateOpen] = useState(false);
+  const [remaining, setRemaining] = useState(REST_SECONDS);
+  const gateSeen = useRef(false);
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -62,7 +74,35 @@ export function LessonPage({
   }, [courseId]);
 
   const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? tree?.units[0] ?? null;
-  const { thinking, prose } = splitTurn(turn);
+  const { thinking, prose: rawProse } = splitTurn(turn);
+  // Everything from a gate token onward is a control signal, not content.
+  const { prose, token } = splitAtGate(rawProse);
+  const frozen = isFrozen(gateOpen, remaining);
+
+  // Open once, on the first turn that carries a token.
+  useEffect(() => {
+    if (!token || gateSeen.current) return;
+    gateSeen.current = true;
+    setGateOpen(true);
+    setRemaining(REST_SECONDS);
+    setBusy(false);
+  }, [token]);
+
+  // The countdown owns its interval and clears it on unmount, like the original's restTimer.
+  useEffect(() => {
+    if (!gateOpen) return;
+    const id = setInterval(() => {
+      setRemaining((r) => {
+        if (r <= 1) {
+          clearInterval(id);
+          setGateOpen(false);
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [gateOpen]);
 
   // Dispatch an arriving prompt once: seed the composer so the learner can SEE what is being asked on
   // their behalf, then send it. The param is stripped from the URL so a reload cannot re-fire it.
@@ -78,6 +118,7 @@ export function LessonPage({
   }, [ask, courseId, unitNumber]);
 
   function exit() {
+    gateSeen.current = false;
     // The course page saves its own scroll offset on the way in (there is no .pane here).
     streamRef.current?.close();
     streamRef.current = null;
@@ -87,6 +128,8 @@ export function LessonPage({
   async function send(explicit?: string) {
     const message = (explicit ?? input).trim();
     if (!message || busy) return;
+    // The gate is a freeze, not a suggestion — same as the original's setBusy(true).
+    if (frozen) return;
     setInput("");
     setBusy(true);
     setError(null);
@@ -218,12 +261,29 @@ export function LessonPage({
           placeholder="Ask a question, or explain it back in your own words…"
           aria-label="Message the tutor"
           rows={1}
-          disabled={busy}
+          disabled={busy || frozen}
         />
-        <button type="button" className="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
-          {busy ? "Waiting…" : "Send"}
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void send()}
+          disabled={busy || frozen || !input.trim()}
+        >
+          {busy ? "Waiting…" : frozen ? "Resting…" : "Send"}
         </button>
       </div>
+
+      {gateOpen ? (
+        <div className="scrim" role="dialog" aria-modal="true" aria-label={REST_HEADING}>
+          <div className="gate rest-gate">
+            <h2 className="display">{REST_HEADING}</h2>
+            <p className="reading">{REST_BODY}</p>
+            <div className="countdown num" aria-live="off">
+              {formatCountdown(remaining)}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
