@@ -539,3 +539,55 @@ a.mod:hover { text-decoration: none; }
   white-space: pre-wrap;
   color: var(--ink-55);
 }
+
+/* ------------------------------------------------------------------- lab */
+
+.lab { max-width: 720px; margin: 0 auto; }
+.tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.tab { border-radius: 999px; padding: 6px 14px; font-size: 12.5px; }
+.tab.active { border-color: var(--action); color: var(--action); background: var(--action-tint); }
+.lab-title { font-size: 30px; margin: 0 0 6px; }
+.lab-motion-note { color: var(--ink-45); margin: 0 0 14px; }
+.provenance { margin-top: 22px; color: var(--ink-45); }
+
+.interactive { margin: 18px 0 0; }
+.interactive-caption { font-size: 15px; color: var(--ink-70); margin: 0 0 14px; }
+.plot { width: 100%; max-width: 420px; border: 1px solid var(--rule); border-radius: 6px; display: block; }
+.params { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; max-width: 420px; }
+.param { display: flex; flex-direction: column; gap: 4px; }
+.param input { width: 100%; }
+
+.launch-bar {
+  position: relative;
+  height: 46px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper-sunk);
+  overflow: hidden;
+  max-width: 520px;
+}
+.launch-bar .band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(45, 122, 76, 0.14);
+  border-left: 1px solid var(--success);
+  border-right: 1px solid var(--success);
+}
+.launch-bar .marker {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--ink);
+  transform: translateX(-1px);
+}
+.launch-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.marker-readout { color: var(--ink-55); font-size: 12.5px; }
+.launch-message { font-size: 14px; color: var(--ink-70); margin-top: 12px; min-height: 22px; }
+.launch-message.hit { color: var(--success); }
+.launch-message.miss { color: var(--warning-strong); }
+
+@media (prefers-reduced-motion: reduce) {
+  .launch-bar .marker { transition: none; }
+}

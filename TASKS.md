@@ -252,9 +252,23 @@
       and completion ("Skill moved to Proficient", 3 of 3).
 
 ## P6 — Interactives and games
-- [ ] **T-030** Interactive + game module types rendered from a declared or generated definition.
+- [x] **T-030** Interactive + game module types rendered from a declared or generated definition.
       **Done when:** browser-verified, reduced-motion respected, canvas loops cancelled on leave.
-- [ ] **T-031** Interactive generation through pi for a concept, validated and stored.
+      **Done** — `#/lab/:courseId/:unit` with tabs, opened from `interact`/`game` module rows. Two kinds:
+      a **slider** (function plot with draggable parameters) and a **target-window game** (launch when the
+      marker is inside the band). Both engines are pure and separately tested: `web/src/expr.ts` is a
+      recursive-descent evaluator (no `eval`, so an authored or generated formula cannot run code) and
+      `web/src/game.ts` holds the timing logic. **Browser-verified:** the plot draws 161 points, `m` and `b`
+      both move the curve, the marker sweeps and both outcomes are reachable (2 hits / 13 misses over 15
+      sampled launches), reduced motion is detected and disclosed, and the frame loop is cancelled on leave —
+      **179 rAF calls while on the lab, 0 after navigating away**.
+- [x] **T-031** Interactive generation through pi for a concept, validated and stored.
+      **Done** — `GET`/`POST /api/courses/:id/interactives`. Authored specs win and generation is never run
+      over them (tested with chat disabled, so a generation attempt would 503). Generated specs pass the same
+      gate as authored ones: the formula must PARSE, every parameter must be coherent (min < max, positive
+      step, value clamped), `xRange` must be a real interval, and a `codebase` course requires a resolvable
+      citation. Cache: `INTERACTIVES/unit-N.json`. A reply with no usable spec returns 422 with the reason,
+      never a partially rendered lab.
 
 ## Backlog — flagged, deliberately not built
 - [ ] **T-042** Assessment validation has a known limit: it is **structural plus citation-resolvable**, so a

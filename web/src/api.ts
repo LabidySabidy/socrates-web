@@ -1,6 +1,7 @@
 /** api.ts — the only place the client talks to the server. */
 import type { CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
 import type { AssessmentsResponse } from "./assessment-types.ts";
+import type { InteractivesResponse } from "./interactives-types.ts";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: "application/json" } });
@@ -114,4 +115,29 @@ export async function recordResult(
   const parsed = (await res.json().catch(() => ({}))) as ResultResponse;
   if (!res.ok) return { recorded: false, error: parsed.error ?? `HTTP ${res.status}` };
   return parsed;
+}
+
+export const fetchInteractives = (id: string, unit: number) =>
+  get<InteractivesResponse>(`/api/courses/${encodeURIComponent(id)}/interactives?unit=${unit}`);
+
+/** Ask the tutor to design an interactive. A failure returns the reason, never a partial result. */
+export async function generateInteractives(id: string, unit: number): Promise<InteractivesResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/interactives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit }),
+  });
+  const body = (await res.json().catch(() => ({}))) as InteractivesResponse;
+  if (!res.ok) {
+    return {
+      unit,
+      source: "none",
+      interactives: [],
+      warnings: [],
+      error: body.error ?? `HTTP ${res.status}`,
+      detail: body.detail,
+      excerpt: body.excerpt,
+    };
+  }
+  return body;
 }

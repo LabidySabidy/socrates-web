@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchCourse, fetchLearning } from "../api.ts";
 import type { CourseRef, CourseTree, LearningData, Unit } from "../types.ts";
 import { MASTERY_STATES, mastery } from "../severity.ts";
-import { hrefCourse, hrefHome, hrefLesson, hrefQuiz } from "../router.ts";
+import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
@@ -15,6 +15,9 @@ const TUTOR_MODULE_TYPES = new Set(["recite", "explain", "ai-activity"]);
 
 /** Module types that open the quiz console. */
 const QUIZ_MODULE_TYPES = new Set(["quiz", "test", "course-challenge"]);
+
+/** Module types that open the interactive / game lab. */
+const LAB_MODULE_TYPES = new Set(["interact", "game"]);
 
 const LEGEND = [
   { label: "Not started", color: "#c9c6bd" },
@@ -175,12 +178,15 @@ export function CoursePage({
                     // screens deferred (P5/P6), so their rows stay static.
                     const opensLesson = TUTOR_MODULE_TYPES.has(mod.type);
                     const opensQuiz = QUIZ_MODULE_TYPES.has(mod.type);
+                    const opensLab = LAB_MODULE_TYPES.has(mod.type);
                     const Row = opensLesson ? "a" : "div";
                     return (
                     <Row
                       className="mod"
                       key={mod.id}
-                      {...(opensQuiz && selected
+                      {...(opensLab && selected
+                        ? { href: hrefLab(courseId, selected.n) }
+                        : opensQuiz && selected
                         ? { href: hrefQuiz(courseId, selected.n) }
                         : opensLesson && selected
                         ? {

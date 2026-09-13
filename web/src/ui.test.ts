@@ -21,6 +21,8 @@ import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "
 import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
 import { isCorrect, type AssessmentItem } from "./assessment-types.ts";
 import { completionView } from "./completion.ts";
+import { compile, sample } from "./expr.ts";
+import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
   canSkip,
@@ -584,4 +586,144 @@ test("before the recording round-trips, nothing about the attempt is claimed", (
   assert.equal(pending.recordedLine, null, "no claim either way while the write is in flight");
   assert.equal(pending.masteryLine, null);
   assert.equal(pending.scoreLine, "3 of 3 correct · no mistakes", "the score is local and always true");
+});
+
+// ---------------------------------------------------------------------------
+// expression evaluator — the interactive plot's engine
+// ---------------------------------------------------------------------------
+
+test("the evaluator computes an expression with parameters and x", () => {
+  const c = compile("m * x + b");
+  assert.equal(c.ok, true);
+  if (!c.ok) return;
+  assert.deepEqual(c.names.sort(), ["b", "m"], "parameters are discovered; x is not one");
+  assert.equal(c.usesX, true);
+  assert.equal(c.evaluate({ m: 3, b: -2, x: 1 }), 1);
+  assert.equal(c.evaluate({ m: 3, b: -2, x: 0 }), -2);
+  assert.equal(c.evaluate({ m: 0, b: 5, x: 9 }), 5);
+});
+
+test("operator precedence and associativity are right", () => {
+  const at = (src: string, scope: Record<string, number> = {}) => {
+    const c = compile(src);
+    assert.equal(c.ok, true, `${src} should compile`);
+    return c.ok ? c.evaluate(scope) : NaN;
+  };
+  assert.equal(at("2 + 3 * 4"), 14, "multiplication binds tighter");
+  assert.equal(at("(2 + 3) * 4"), 20);
+  assert.equal(at("2 ^ 3 ^ 2"), 512, "power is right associative");
+  assert.equal(at("-2 ^ 2"), -4, "unary minus binds looser than power");
+  assert.equal(at("10 / 2 / 5"), 1, "division is left associative");
+});
+
+test("functions and constants work, and unknown names are refused", () => {
+  const c = compile("max(sin(pi / 2), 0) + sqrt(9)");
+  assert.equal(c.ok, true);
+  if (c.ok) assert.equal(c.evaluate({}), 4);
+
+  const unknownFn = compile("frobnicate(x)");
+  assert.equal(unknownFn.ok, false);
+  if (!unknownFn.ok) assert.match(unknownFn.error, /unknown function/);
+
+  assert.equal(compile("").ok, false);
+  assert.equal(compile("2 +").ok, false);
+  assert.equal(compile("(2 + 3").ok, false, "unbalanced parens");
+  assert.equal(compile("2 3").ok, false, "trailing input");
+  assert.equal(compile("x; process.exit(1)").ok, false, "no statement injection");
+});
+
+test("an unknown identifier evaluates to NaN, so it is skipped rather than plotted as 0", () => {
+  const c = compile("a * x");
+  assert.equal(c.ok, true);
+  if (!c.ok) return;
+  assert.equal(Number.isNaN(c.evaluate({ x: 1 })), true);
+  assert.deepEqual(sample(c, { x: 1 }, { min: 0, max: 1 }, 3), [], "no points survive NaN");
+});
+
+test("sample spans the range inclusively and skips only non-finite results", () => {
+  const c = compile("sqrt(x)");
+  assert.equal(c.ok, true);
+  if (!c.ok) return;
+  const points = sample(c, {}, { min: -4, max: 4 }, 8);
+  assert.ok(points.length > 0 && points.length < 9, "negative roots are dropped");
+  assert.equal(points[0].x > -4, true, "the first finite x is after the negative half");
+  assert.equal(points.at(-1)!.x, 4, "the range's end is reached");
+
+  const line = compile("x");
+  if (!line.ok) return;
+  const all = sample(line, {}, { min: -1, max: 1 }, 2);
+  assert.deepEqual(all, [{ x: -1, y: -1 }, { x: 0, y: 0 }, { x: 1, y: 1 }]);
+  assert.deepEqual(sample(line, {}, { min: 5, max: 5 }, 10), [], "an empty span yields nothing");
+});
+
+// ---------------------------------------------------------------------------
+// launch-window game logic
+// ---------------------------------------------------------------------------
+
+const GAME = { kind: "target-window" as const, speed: 1, band: [40, 60] as [number, number] };
+
+test("the marker sweeps 0..100 and back, deterministically", () => {
+  assert.equal(markerAt(0, 1), 0);
+  assert.equal(markerAt(0.5, 1), 100, "half a period is the far end");
+  assert.equal(markerAt(1, 1), 0, "a full period returns home");
+  assert.equal(markerAt(0.25, 1), 50);
+  assert.equal(markerAt(-0.25, 1), 50, "negative time is handled too");
+});
+
+test("launching inside the band hits, outside it misses", () => {
+  const inBand = launch({ ...initGame(), marker: 50 }, GAME);
+  assert.equal(inBand.outcome, "hit");
+  assert.equal(inBand.shots, 1);
+  assert.equal(inBand.hits, 1);
+  assert.match(inBand.message, /Insertion/);
+
+  const outside = launch({ ...initGame(), marker: 10 }, GAME);
+  assert.equal(outside.outcome, "miss");
+  assert.equal(outside.hits, 0);
+  assert.match(outside.message, /Relaunch/);
+});
+
+test("the band's edges are inclusive", () => {
+  assert.equal(launch({ ...initGame(), marker: 40 }, GAME).outcome, "hit");
+  assert.equal(launch({ ...initGame(), marker: 60 }, GAME).outcome, "hit");
+  assert.equal(launch({ ...initGame(), marker: 39.9 }, GAME).outcome, "miss");
+});
+
+test("a second launch mid-flight is ignored, so double-pressing cannot cheat", () => {
+  const first = launch({ ...initGame(), marker: 50 }, GAME);
+  const second = launch(first, GAME);
+  assert.equal(second, first, "the state is returned untouched");
+  assert.equal(second.shots, 1);
+});
+
+test("the arc clears after its delay and the marker resumes", () => {
+  let state = launch({ ...initGame(), marker: 10 }, GAME);
+  assert.equal(state.phase, "resolved");
+  state = tick(state, 0.5, GAME);
+  assert.equal(state.phase, "resolved", "still clearing");
+  state = tick(state, CLEAR_AFTER_SECONDS, GAME);
+  assert.equal(state.phase, "idle");
+  assert.equal(state.outcome, null);
+  assert.equal(state.shots, 1, "the tally survives the reset");
+});
+
+test("tick advances the marker and tolerates a zero or negative delta", () => {
+  const t1 = tick(initGame(), 0.25, GAME);
+  assert.equal(t1.marker, 50);
+  assert.equal(tick(t1, 0, GAME).t, t1.t, "no time passes");
+  assert.equal(tick(t1, -5, GAME).t, t1.t, "negative dt does not rewind");
+});
+
+test("accuracy is null until a shot is taken", () => {
+  assert.equal(accuracy(initGame()), null);
+  let state = launch({ ...initGame(), marker: 50 }, GAME);
+  assert.equal(accuracy(state), 1);
+  state = tick(state, CLEAR_AFTER_SECONDS + 0.1, GAME);
+  state = launch({ ...state, marker: 0 }, GAME);
+  assert.equal(accuracy(state), 0.5);
+});
+
+test("the band fraction maps to bar geometry", () => {
+  assert.deepEqual(bandFraction([40, 60]), { start: 0.4, width: 0.2 });
+  assert.deepEqual(bandFraction([-10, 200]), { start: 0, width: 1 });
 });

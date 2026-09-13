@@ -575,6 +575,76 @@ test("a malformed result body is refused", async (t) => {
   assert.equal(unknown.status, 404);
 });
 
+// ---------------------------------------------------------------------------
+// interactives and games
+// ---------------------------------------------------------------------------
+
+const LAB = join(FIXTURES, "course-lab");
+
+test("GET /api/courses/:id/interactives returns authored specs, validated", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/courses/course-lab/interactives?unit=1`);
+
+  assert.equal(status, 200);
+  assert.equal(body.source, "authored");
+  assert.deepEqual(body.warnings, []);
+  assert.deepEqual(body.interactives.map((i: { spec: { kind: string } }) => i.spec.kind), [
+    "slider",
+    "target-window",
+  ]);
+
+  const slider = body.interactives[0].spec;
+  assert.equal(slider.fn, "m * x + b");
+  assert.deepEqual(slider.xRange, [-6, 6]);
+  assert.deepEqual(slider.params.map((p: { name: string }) => p.name), ["m", "b"]);
+  assert.deepEqual(slider.cites, ["src/slope.ts#L2"]);
+
+  const game = body.interactives[1].spec;
+  assert.deepEqual(game.band, [44, 56]);
+  assert.equal(game.speed, 0.9);
+});
+
+test("the interactives route is 404 for an unknown course and 400 for a bad unit", async (t) => {
+  const { base } = await boot(t);
+  assert.equal((await fetch(`${base}/api/courses/nope/interactives?unit=1`)).status, 404);
+  assert.equal((await fetch(`${base}/api/courses/course-basic/interactives?unit=0`)).status, 400);
+});
+
+test("a course with no authored interactive reports source none", async (t) => {
+  const { base } = await boot(t);
+  const { body } = await getJson(`${base}/api/courses/course-basic/interactives?unit=1`);
+  assert.equal(body.source, "none");
+  assert.deepEqual(body.interactives, []);
+});
+
+test("generation never runs over an authored interactive", async (t) => {
+  // chat is disabled here, so a generation attempt would 503 — proving none was made.
+  const { base } = await boot(t);
+  const res = await fetch(`${base}/api/courses/course-lab/interactives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1 }),
+  });
+  assert.equal(res.status, 200, "authored wins without touching the agent");
+  const body = await res.json();
+  assert.equal(body.source, "authored");
+  assert.equal(body.interactives.length, 2);
+});
+
+test("a generated interactive that fails validation is refused, not half-served", async (t) => {
+  const { base } = await bootChat(t); // the mock replies with prose, so extraction fails
+  const res = await fetch(`${base}/api/courses/course-basic/interactives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1 }),
+  });
+  assert.equal(res.status, 422);
+  const body = await res.json();
+  assert.match(body.error, /did not produce a usable interactive/);
+  assert.match(body.detail, /no JSON block/);
+  assert.equal(body.interactives, undefined, "no partial result");
+});
+
 test("static files are served and path traversal is refused", async (t) => {
   const { base } = await boot(t);
   const index = await fetch(`${base}/`);

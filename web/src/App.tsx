@@ -9,6 +9,7 @@ import { HomePage } from "./components/HomePage.tsx";
 import { CoursePage } from "./components/CoursePage.tsx";
 import { LessonPage } from "./components/LessonPage.tsx";
 import { QuizPage } from "./components/QuizPage.tsx";
+import { LabPage } from "./components/LabPage.tsx";
 
 export function App() {
   const route = useRoute();
@@ -33,7 +34,15 @@ export function App() {
   return (
     <>
       <TopBar courseCount={data ? visible.length : null} />
-      {route.name === "quiz" ? (
+      {route.name === "lab" ? (
+        <LabPage
+          courseId={route.courseId}
+          unitNumber={route.unit}
+          onExit={() => {
+            window.location.hash = hrefCourse(route.courseId, route.unit).slice(1);
+          }}
+        />
+      ) : route.name === "quiz" ? (
         <QuizPage
           courseId={route.courseId}
           unitNumber={route.unit}

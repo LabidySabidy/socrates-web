@@ -45,6 +45,13 @@ import {
   validateItems,
   writeCache,
 } from "./assessments.ts";
+import {
+  buildGenerationPrompt as buildInteractivePrompt,
+  extractSpecs,
+  readCache as readInteractiveCache,
+  validateSpecs,
+  writeCache as writeInteractiveCache,
+} from "./interactives.ts";
 
 export interface ServerOptions {
   port?: number;
@@ -615,6 +622,118 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             rejected: errors,
             warnings: errors.length > 0 ? [`${errors.length} generated item(s) rejected`] : [],
           });
+        } catch (err) {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+    }
+
+    // --- interactives and games: authored, else generated and validated -------
+    const labMatch = /^\/api\/courses\/([^/]+)\/interactives$/.exec(url);
+    if (labMatch) {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(labMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${labMatch[1]}` });
+        return;
+      }
+      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+      const unit = Number(query.get("unit") ?? "1");
+      if (!Number.isFinite(unit) || unit < 1) {
+        sendJson(res, 400, { error: "unit must be a positive number" });
+        return;
+      }
+
+      if (req.method === "GET") {
+        try {
+          const tree = loadCourseTree(ref, readText);
+          const authored = tree.interactives.filter((i) => i.unit === unit);
+          if (authored.length > 0) {
+            sendJson(res, 200, {
+              unit,
+              source: "authored",
+              interactives: authored,
+              warnings: tree.warnings.filter((w) => w.startsWith("interactive")),
+            });
+            return;
+          }
+          const cached = readInteractiveCache(ref.dir, unit);
+          if (cached) {
+            sendJson(res, 200, {
+              unit,
+              source: "cache",
+              generatedAt: cached.generatedAt,
+              interactives: cached.interactives,
+              warnings: [],
+            });
+            return;
+          }
+          sendJson(res, 200, { unit, source: "none", interactives: [], warnings: [] });
+        } catch (err) {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { unit?: unknown };
+          const wanted = typeof body.unit === "number" ? body.unit : unit;
+          const tree = loadCourseTree(ref, readText);
+
+          const authored = tree.interactives.filter((i) => i.unit === wanted);
+          if (authored.length > 0) {
+            sendJson(res, 200, { unit: wanted, source: "authored", interactives: authored, warnings: [] });
+            return;
+          }
+          const unitTree = tree.units.find((u) => u.n === wanted);
+          if (!unitTree) {
+            sendJson(res, 404, { error: `unit ${wanted} not found in ${ref.id}` });
+            return;
+          }
+
+          const prompt = buildInteractivePrompt({
+            courseTitle: tree.title,
+            unitTitle: unitTree.title,
+            kind: tree.kind,
+            concepts: unitTree.concepts,
+          });
+          const turn = await runTurn(ref.dir, prompt);
+          if (turn.error) {
+            sendJson(res, 502, { error: "generation failed", detail: turn.error });
+            return;
+          }
+          const extracted = extractSpecs(turn.text);
+          if (extracted.error) {
+            sendJson(res, 422, {
+              error: "generation did not produce a usable interactive",
+              detail: extracted.error,
+              excerpt: turn.text.slice(0, 400),
+            });
+            return;
+          }
+          const { specs, errors } = validateSpecs(extracted.raw, {
+            kind: tree.kind,
+            oracle: courseOracle(ref.dir),
+            prefix: `unit${wanted}-i`,
+          });
+          if (specs.length === 0) {
+            sendJson(res, 422, {
+              error: "no generated interactive passed validation",
+              detail: errors.join("; ") || "the reply contained no interactives",
+            });
+            return;
+          }
+          const interactives = specs.map((spec, i) => ({
+            id: `unit${wanted}-i${i + 1}`,
+            title: unitTree.title,
+            unit: wanted,
+            source: "generated" as const,
+            spec,
+          }));
+          writeInteractiveCache(ref.dir, wanted, interactives, new Date().toISOString());
+          sendJson(res, 200, { unit: wanted, source: "generated", interactives, rejected: errors, warnings: [] });
         } catch (err) {
           sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
         }

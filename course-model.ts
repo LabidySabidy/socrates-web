@@ -20,6 +20,7 @@
 import type { Badge, LearningData } from "./learning-parser.ts";
 import { SEVERITIES, severityState, type SeverityState } from "./learning-parser.ts";
 import { courseOracle, validateItems, type AssessmentItem, type CiteOracle, type Quiz } from "./assessments.ts";
+import { validateSpecs, type Interactive, type Spec } from "./interactives.ts";
 
 // ---------------------------------------------------------------------------
 // Mastery — the five-state union. Six states is never correct.
@@ -155,6 +156,8 @@ export interface CourseTree {
   units: Unit[];
   /** Authored quizzes, bound to a unit by manifest position. Validated on load. */
   quizzes: Quiz[];
+  /** Authored interactives and games, likewise bound by position and validated on load. */
+  interactives: Interactive[];
   mastery: { counts: Record<MasteryState, number>; aggregate: Mastery; total: number };
 }
 
@@ -295,6 +298,7 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
 
   let units = deriveUnits(src, warnings);
   let quizzes: Quiz[] = [];
+  let interactives: Interactive[] = [];
   let derived = true;
   let kind: CourseTree["kind"] = "topic";
   let courseTitle = title;
@@ -306,6 +310,13 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     } else {
       units = parsed.units;
       quizzes = parsed.quizzes;
+      interactives = parsed.interactives.map((lab) => ({
+        id: lab.id,
+        title: lab.title,
+        unit: lab.unit,
+        source: "authored" as const,
+        spec: lab.spec,
+      }));
       derived = false;
       kind = parsed.kind;
       if (parsed.title) courseTitle = parsed.title;
@@ -329,6 +340,22 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     quizzes = checked;
   }
 
+  // An authored interactive must satisfy the same gate a generated one does, or it is not served.
+  if (interactives.length > 0) {
+    const kept: Interactive[] = [];
+    for (const interactive of interactives) {
+      const { specs, errors } = validateSpecs([interactive.spec], {
+        kind,
+        oracle,
+        prefix: `${interactive.id}-i`,
+      });
+      for (const error of errors) warnings.push(`interactive-invalid:${interactive.id}:${error}`);
+      if (specs.length > 0) kept.push({ ...interactive, spec: specs[0] });
+      else if (errors.length > 0) warnings.push(`interactive-dropped:${interactive.id}`);
+    }
+    interactives = kept;
+  }
+
   if (units.length === 0 && !warnings.includes(WARN.noConcepts)) warnings.push(WARN.noConcepts);
 
   const conceptMasteries = src.data.schema.concepts.map((c) => masteryOf(c.badge));
@@ -343,6 +370,7 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     plan: { sequence: src.data.plan.sequence, cutList: src.data.plan.cutList },
     units,
     quizzes,
+    interactives,
     mastery: {
       counts: countByMastery(conceptMasteries),
       aggregate: aggregateMastery(conceptMasteries),
@@ -358,6 +386,7 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
 export interface ManifestResult {
   units: Unit[];
   quizzes: Quiz[];
+  interactives: { id: string; title: string; unit: number; spec: Spec }[];
   kind: CourseTree["kind"];
   title?: string;
   warnings: string[];
@@ -366,8 +395,10 @@ export interface ManifestResult {
 const UNIT_RE = /^##\s+Unit\s+(\d+)\s*:\s*(.+?)\s*$/;
 const GROUP_RE = /^###\s+Group\s*:\s*(.+?)\s*$/;
 const QUIZ_SECTION_RE = /^##\s+Quiz\s*:\s*(.+?)\s*$/;
+const LAB_SECTION_RE = /^##\s+(Interactive|Game)\s*:\s*(.+?)\s*$/;
+const LAB_FIELD_RE = /^\s*-\s+\*\*(kind|fn|caption|param|speed|band|cites|xrange):\*\*\s*(.*)$/i;
 const QUESTION_RE = /^-\s+\*\*Q\*\*\s+(.*)$/;
-const ITEM_FIELD_RE = /^\s+-\s+\*\*(answer|accepts|hint|step|cite):\*\*\s*(.*)$/i;
+const ITEM_FIELD_RE = /^\s*-\s+\*\*(answer|accepts|hint|step|cite):\*\*\s*(.*)$/i;
 const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z][a-z-]*)`\)\s+(.*)$/;
 const QUIZ_RE = /^-\s+\*\*Quiz\*\*\s+(\d+)\s+items?\s*$/;
 const REF_RE = /@([a-z0-9][a-z0-9-]*)/i;
@@ -405,6 +436,10 @@ export function parseCourseManifest(
   let quiz: { title: string; unit: number; items: RawItem[] } | null = null;
   const sections: { title: string; unit: number; items: RawItem[] }[] = [];
   let item: RawItem | null = null;
+
+  // Interactives are collected raw and validated by buildCourse, like quiz items.
+  let lab: { title: string; unit: number; raw: Record<string, unknown> } | null = null;
+  const labSections: { title: string; unit: number; raw: Record<string, unknown> }[] = [];
 
   for (const raw of text.split("\n")) {
     const line = raw.trim();
@@ -474,6 +509,45 @@ export function parseCourseManifest(
       continue;
     }
 
+    const labSection = LAB_SECTION_RE.exec(line);
+    if (labSection) {
+      if (!unit) return { error: `interactive before any unit: ${labSection[2]}` };
+      if (lab) labSections.push(lab);
+      lab = {
+        title: labSection[2],
+        unit: unit.n,
+        // A Game section implies the kind unless the body says otherwise.
+        raw: { kind: labSection[1].toLowerCase() === "game" ? "target-window" : "slider" },
+      };
+      quiz = null;
+      item = null;
+      continue;
+    }
+
+    const labField = LAB_FIELD_RE.exec(raw);
+    if (labField) {
+      const key = labField[1].toLowerCase();
+      const value = labField[2].trim();
+      if (key === "kind") lab.raw.kind = value;
+      else if (key === "fn") lab.raw.fn = value;
+      else if (key === "caption") lab.raw.caption = value;
+      else if (key === "cites") lab.raw.cites = value.split(",").map((c) => c.trim()).filter(Boolean);
+      else if (key === "xrange") {
+        const [a, b] = value.split("|").map((v) => Number(v.trim()));
+        lab.raw.xRange = [a, b];
+      } else if (key === "speed") lab.raw.speed = Number(value);
+      else if (key === "band") {
+        const [a, b] = value.split("|").map((v) => Number(v.trim()));
+        lab.raw.band = [a, b];
+      } else if (key === "param") {
+        const [name, min, max, step, val] = value.split("|").map((v) => v.trim());
+        const params = (lab.raw.params as unknown[]) ?? [];
+        params.push({ name, min: Number(min), max: Number(max), step: Number(step), value: Number(val) });
+        lab.raw.params = params;
+      }
+      continue;
+    }
+
     const moduleMatch = MODULE_RE.exec(line);
     if (moduleMatch) {
       if (!unit) return { error: `module before any unit: ${moduleMatch[2]}` };
@@ -530,6 +604,15 @@ export function parseCourseManifest(
 
   if (units.length === 0) return { error: "no units declared" };
   if (quiz) sections.push(quiz);
+  if (lab) labSections.push(lab);
+
+  const authoredLabs = labSections.map((s) => ({
+    id: slug(s.title),
+    title: s.title,
+    unit: s.unit,
+    // Validated in buildCourse, where the course kind and the filesystem are known.
+    spec: s.raw as unknown as Spec,
+  }));
 
   const authoredQuizzes: Quiz[] = sections
     // An empty section is a declaration the tutor should fill, not a broken quiz.
@@ -555,6 +638,7 @@ export function parseCourseManifest(
   return {
     units,
     quizzes: authoredQuizzes,
+    interactives: authoredLabs,
     kind: kindMatch?.[1] === "codebase" ? "codebase" : "topic",
     title: titleMatch?.[1],
     warnings,

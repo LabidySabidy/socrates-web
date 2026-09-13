@@ -15,6 +15,7 @@ export type Route =
   | { name: "course"; courseId: string; unit: number | null }
   | { name: "lesson"; courseId: string; unit: number }
   | { name: "quiz"; courseId: string; unit: number }
+  | { name: "lab"; courseId: string; unit: number }
   | { name: "unknown"; raw: string };
 
 export function parseHash(hash: string): Route {
@@ -28,6 +29,10 @@ export function parseHash(hash: string): Route {
       courseId: decodeURIComponent(parts[1]),
       unit: Number.isFinite(unit) && unit > 0 ? unit : 1,
     };
+  }
+  if (parts[0] === "lab" && parts[1]) {
+    const unit = Number(parts[2]);
+    return { name: "lab", courseId: decodeURIComponent(parts[1]), unit: Number.isFinite(unit) && unit > 0 ? unit : 1 };
   }
   if (parts[0] === "quiz" && parts[1]) {
     const unit = Number(parts[2]);
@@ -53,6 +58,10 @@ export function hrefHome(): string {
 }
 export function hrefCourse(courseId: string, unit?: number): string {
   return unit ? `#/course/${encodeURIComponent(courseId)}/${unit}` : `#/course/${encodeURIComponent(courseId)}`;
+}
+
+export function hrefLab(courseId: string, unit: number): string {
+  return `#/lab/${encodeURIComponent(courseId)}/${unit}`;
 }
 
 export function hrefQuiz(courseId: string, unit: number): string {
