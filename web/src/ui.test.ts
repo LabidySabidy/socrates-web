@@ -300,7 +300,7 @@ test("every module type has a label and an icon glyph, including the four taxono
 });
 
 // ---------------------------------------------------------------------------
-// discovery is intentional: a course must be initiated
+// the catalogue is the store: every course in it was started by the learner
 // ---------------------------------------------------------------------------
 
 test("every course in the store reaches the catalogue — there is nothing to filter", () => {

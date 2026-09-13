@@ -80,7 +80,7 @@ export function HomePage({
       <h1 className="display greeting">{greeting()}</h1>
       <p className="greeting-sub reading">
         {visible.length === 0
-          ? "No courses discovered yet."
+          ? "Your library is empty."
           : `${graded} of ${visible.reduce((n, c) => n + c.concepts, 0)} concepts are graded Familiar or better.`}
       </p>
 
@@ -99,17 +99,28 @@ export function HomePage({
       ) : null}
 
       {data.warnings.length > 0 ? (
-        <p className="notice">Discovery warnings: {data.warnings.join(", ")}</p>
+        <p className="notice">Warnings: {data.warnings.join(", ")}</p>
       ) : null}
 
       <ManageCourses courses={data.courses} onChanged={onChanged} />
 
       {visible.length === 0 ? (
         <div className="empty-note">
-          <h2>Nothing here yet</h2>
+          <h2>Start with a subject</h2>
+          {/*
+           * The empty state is the first thing a new learner reads, so it names the next action
+           * rather than describing where a course might be found. The old copy asserted the removed
+           * model — "a course is any directory containing .agent/learning/" — which is exactly the
+           * frame P16 deleted, and it left the learner with nothing to do.
+           */}
           <p>
-            No course was found under <code>{data.root ?? "(no scan root)"}</code>. A course is any
-            directory containing <code>.agent/learning/</code>.
+            A course begins with a subject you name — not a folder you point at. Use{" "}
+            <strong>Start a course</strong> above: type what you want to learn in your own words, and
+            Socrates interviews you about what you will be able to do, what you will build, and what
+            you already know. Your answers become the mission.
+          </p>
+          <p className="eyebrow">
+            Courses live in <code>{data.root ?? "~/.socrates/courses"}</code>.
           </p>
         </div>
       ) : (
