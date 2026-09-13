@@ -20,6 +20,7 @@ import {
 import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
 import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
 import { isCorrect, type AssessmentItem } from "./assessment-types.ts";
+import { completionView } from "./completion.ts";
 import {
   actionLabel,
   canSkip,
@@ -539,4 +540,48 @@ test("the score counts right and wrong dots", () => {
   s = setAnswer(s, "9");
   s = check(s, item());
   assert.deepEqual(score(s), { right: 1, wrong: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// the completion screen may only claim what a field backs
+// ---------------------------------------------------------------------------
+
+test("with no mastery field on the response, no mastery claim is rendered", () => {
+  const view = completionView({ right: 3, wrong: 0, total: 3, recorded: true, mastery: null });
+  assert.equal(view.masteryLine, null, "a mastery claim with no backing field must not render");
+  assert.equal(view.scoreLine, "3 of 3 correct · no mistakes");
+  assert.equal(view.recordedLine, "This attempt was recorded in the course history.");
+  assert.equal(view.heading, "Nice work.");
+});
+
+test("an absent mastery field behaves exactly like a null one", () => {
+  const omitted = completionView({ right: 1, wrong: 2, total: 3, recorded: true });
+  assert.equal(omitted.masteryLine, null);
+  const blank = completionView({ right: 1, wrong: 2, total: 3, recorded: true, mastery: "   " });
+  assert.equal(blank.masteryLine, null, "whitespace is not a mastery value");
+  assert.equal(blank.scoreLine, "1 of 3 correct · 2 answered wrong");
+});
+
+test("a mastery claim renders only when the response actually carries one", () => {
+  const view = completionView({ right: 3, wrong: 0, total: 3, recorded: true, mastery: "Proficient" });
+  assert.equal(view.masteryLine, "Skill moved to Proficient");
+});
+
+test("a failed recording says so rather than claiming history", () => {
+  const view = completionView({
+    right: 2,
+    wrong: 1,
+    total: 3,
+    recorded: false,
+    recordError: "HTTP 500",
+  });
+  assert.equal(view.recordedLine, "Not recorded: HTTP 500");
+  assert.equal(view.masteryLine, null);
+});
+
+test("before the recording round-trips, nothing about the attempt is claimed", () => {
+  const pending = completionView({ right: 3, wrong: 0, total: 3, recorded: false });
+  assert.equal(pending.recordedLine, null, "no claim either way while the write is in flight");
+  assert.equal(pending.masteryLine, null);
+  assert.equal(pending.scoreLine, "3 of 3 correct · no mistakes", "the score is local and always true");
 });

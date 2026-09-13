@@ -492,6 +492,89 @@ test("a prompt for an unknown or uninitiated course is refused", async (t) => {
   assert.match(uninitiated.body.error, /not initiated/);
 });
 
+// ---------------------------------------------------------------------------
+// quiz results are history, not a mastery claim
+// ---------------------------------------------------------------------------
+
+test("a completed attempt is appended to the course log, and claims no mastery", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(BASIC, ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  const res = await fetch(`${base}/api/courses/course-basic/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      unit: 1,
+      source: "authored",
+      right: 2,
+      wrong: 1,
+      total: 3,
+      itemIds: ["q1", "q2", "q3"],
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+
+  assert.equal(body.recorded, true);
+  assert.equal(body.right, 2);
+  assert.equal(body.total, 3);
+  assert.equal(body.mastery, null, "nothing computes a mastery change, so nothing is claimed");
+
+  const line = readFileSync(logPath, "utf8").trim().split(String.fromCharCode(10)).at(-1)!;
+  const event = JSON.parse(line);
+  assert.equal(event.kind, "assessment_result");
+  assert.equal(event.v, 1);
+  assert.equal(event.unit, 1);
+  assert.equal(event.quiz_source, "authored");
+  assert.equal(event.right, 2);
+  assert.equal(event.wrong, 1);
+  assert.equal(event.total, 3);
+  assert.deepEqual(event.item_ids, ["q1", "q2", "q3"]);
+  assert.match(event.ts, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("the appended event is parseable by the journal reader", async (t) => {
+  const { base } = await boot(t);
+  const logPath = join(BASIC, ".agent", "learning", "events.jsonl");
+  t.after(() => rmSync(logPath, { force: true }));
+
+  await fetch(`${base}/api/courses/course-basic/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1, source: "generated", right: 3, wrong: 0, total: 3, itemIds: [] }),
+  });
+
+  // The reader counts malformed lines; a kind it does not know would show up there.
+  const { status, body } = await getJson(`${base}/api/courses/course-basic/journal`);
+  assert.equal(status, 200);
+  assert.equal(body.events.count, 1, "the attempt is a well-formed event");
+  assert.equal(body.events.malformed, 0, "not counted as malformed");
+});
+
+test("a malformed result body is refused", async (t) => {
+  const { base } = await boot(t);
+  const post = async (payload: unknown) => {
+    const res = await fetch(`${base}/api/courses/course-basic/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  assert.equal((await post({ unit: 1, right: 2 })).status, 400);
+  assert.equal((await post({ unit: 0, right: 1, wrong: 0, total: 1 })).status, 400);
+  assert.equal((await post({ unit: 1, right: -1, wrong: 0, total: 1 })).status, 400);
+
+  const unknown = await fetch(`${base}/api/courses/nope/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1, right: 1, wrong: 0, total: 1 }),
+  });
+  assert.equal(unknown.status, 404);
+});
+
 test("static files are served and path traversal is refused", async (t) => {
   const { base } = await boot(t);
   const index = await fetch(`${base}/`);

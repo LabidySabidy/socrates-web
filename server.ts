@@ -36,7 +36,7 @@ import {
   type DiscoveryResult,
 } from "./courses.ts";
 import { ProcessBridge } from "./process-bridge.ts";
-import { readJournal, readSessionMarkdown } from "./journal.ts";
+import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import {
   buildGenerationPrompt,
   courseOracle,
@@ -620,6 +620,52 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         }
         return;
       }
+    }
+
+    // --- quiz results: recorded as history, never as a mastery claim -----------
+    const resultsMatch = /^\/api\/courses\/([^/]+)\/results$/.exec(url);
+    if (resultsMatch && req.method === "POST") {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(resultsMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${resultsMatch[1]}` });
+        return;
+      }
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+        const num = (v: unknown): number | null =>
+          typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+        const right = num(body.right);
+        const wrong = num(body.wrong);
+        const total = num(body.total);
+        const unit = num(body.unit);
+        if (right === null || wrong === null || total === null || unit === null || unit < 1) {
+          sendJson(res, 400, { error: "unit, right, wrong and total are required numbers" });
+          return;
+        }
+
+        appendEvent(ref.dir, {
+          v: 1,
+          ts: new Date().toISOString(),
+          kind: "assessment_result",
+          cwd: ref.dir,
+          unit,
+          quiz_source: typeof body.source === "string" ? body.source : "unknown",
+          right,
+          wrong,
+          total,
+          item_ids: Array.isArray(body.itemIds)
+            ? body.itemIds.filter((i): i is string => typeof i === "string")
+            : [],
+        });
+
+        // `mastery` is deliberately null: no projection computes a mastery change from an attempt,
+        // so the client has no field to render a claim from. It appears here only when one exists.
+        sendJson(res, 200, { recorded: true, unit, right, wrong, total, mastery: null });
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
     }
 
     // --- legacy alias removed in P2 -----------------------------------------

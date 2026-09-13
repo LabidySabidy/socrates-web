@@ -257,6 +257,14 @@
 - [ ] **T-031** Interactive generation through pi for a concept, validated and stored.
 
 ## Backlog — flagged, deliberately not built
+- [ ] **T-042** Assessment validation has a known limit: it is **structural plus citation-resolvable**, so a
+      wrong-but-well-cited generated item passes. Not solved, and not claimed to be — the mitigation shipped is
+      that every quiz item shows its provenance (`authored` / `generated` / `cached`) and its citations. A
+      future option is a second pass that checks the answer against the cited artifact.
+- [ ] **T-043** No projection consumes `assessment_result` yet, so a quiz attempt is recorded history that
+      changes nothing. Wiring it into a mastery projection is a deliberate future step; until then the
+      completion screen must not imply one. **Guard:** `completionView` renders a mastery line only when the
+      response carries a mastery value, and that is tested.
 - [ ] **T-041** A "start a course" affordance. A not-initiated directory can only be fixed by authoring
       `MISSION.md` by hand — there is no UI path and no scaffold flow in the app. Acceptable while the
       catalogue is small; revisit as it grows. The scaffold skill already knows how to write the three files,

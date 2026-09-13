@@ -38,6 +38,7 @@ Session-scoped events carry `session_id`, `session_file`, and `cwd` in addition 
 | `note` | `concept`, `text` | tutor or user |
 | `decision` | `concept`, `text` | tutor or user |
 | `telemetry_missing` | `reason`, `evidence` | hook, deterministic |
+| `assessment_result` | `unit`, `quiz_source`, `right`, `wrong`, `total`, `item_ids` | socrates-web |
 
 Field notes:
 
@@ -48,6 +49,14 @@ Field notes:
   agent-turn count, so it is not recorded at all.
 - `note` and `decision` are the free-form journal: they project into `SESSIONS/<...>.md` and stay in the
   log permanently.
+- **`assessment_result`** is written by **socrates-web**, not by the extension — the only place the web app
+  writes into a course. It records a completed quiz attempt so the attempt is real history rather than a
+  transient screen. It carries **no** `session_id` or `session_file`, because a quiz attempt happens outside
+  a tutor session; consumers must not assume those fields are present.
+  It is deliberately **not** consumed by any projection: nothing computes a mastery change from an attempt, so
+  `POST /api/courses/:id/results` returns `mastery: null` and the completion screen claims nothing beyond the
+  score and the fact of recording. When a projection does compute a mastery change, it should read this event
+  rather than the log needing a rewrite.
 - **`severity`** is tutor-emitted: `root` — core mental model is wrong · `partial` — right idea applied
   wrongly · `edge` — isolated slip, not a model flaw. It is **never inferred from the misconception
   prose**; an absent field means unrated. An omission on a later event does **not** clear a rating

@@ -6,7 +6,8 @@
  * All state transitions live in `quiz.ts`; this file only renders them.
  */
 import { useEffect, useState } from "react";
-import { fetchAssessments, fetchCourse, generateAssessments } from "../api.ts";
+import { fetchAssessments, fetchCourse, generateAssessments, recordResult } from "../api.ts";
+import { completionView, type CompletionView } from "../completion.ts";
 import type { AssessmentsResponse } from "../assessment-types.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse } from "../router.ts";
@@ -41,6 +42,7 @@ export function QuizPage({
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [completion, setCompletion] = useState<CompletionView | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -84,6 +86,49 @@ export function QuizPage({
     const id = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(id);
   }, [state.feedback, state.index]);
+
+  // Record the attempt once, when the quiz finishes. The screen renders only what came back.
+  useEffect(() => {
+    if (!state.done || !data || data.items.length === 0) return;
+    let alive = true;
+    const result = score(state);
+    recordResult(courseId, {
+      unit: unitNumber,
+      source: data.source,
+      right: result.right,
+      wrong: result.wrong,
+      total: state.count,
+      itemIds: data.items.map((i) => i.id),
+    })
+      .then((res) => {
+        if (!alive) return;
+        setCompletion(
+          completionView({
+            right: result.right,
+            wrong: result.wrong,
+            total: state.count,
+            recorded: res.recorded === true,
+            mastery: res.mastery,
+            recordError: res.recorded ? null : (res.error ?? "unknown error"),
+          }),
+        );
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setCompletion(
+          completionView({
+            right: result.right,
+            wrong: result.wrong,
+            total: state.count,
+            recorded: false,
+            recordError: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      });
+    return () => {
+      alive = false;
+    };
+  }, [state.done, courseId, unitNumber, data]);
 
   async function generate() {
     setGenerating(true);
@@ -187,6 +232,9 @@ export function QuizPage({
 
   if (state.done) {
     const result = score(state);
+    // Until the recording round-trips, the screen says nothing about the attempt.
+    const view =
+      completion ?? completionView({ right: result.right, wrong: result.wrong, total: state.count, recorded: false });
     return (
       <div className="lesson">
         <nav className="lesson-bar" aria-label="Quiz">
@@ -202,15 +250,13 @@ export function QuizPage({
           </button>
         </nav>
         <main className="page quiz-done">
-          <div className="eyebrow">Quiz complete</div>
-          <h1 className="display">Nice work.</h1>
-          <p className="reading quiz-mastery">
-            Skill moved to <strong>{result.wrong === 0 ? "Proficient" : "Familiar"}</strong>
-          </p>
-          <p className="reading">
-            {result.right} of {state.count} correct
-            {result.wrong > 0 ? ` · ${result.wrong} answered wrong` : " · no mistakes"}
-          </p>
+          <div className="eyebrow">Quiz complete · {data.source} quiz</div>
+          <h1 className="display">{view.heading}</h1>
+          {/* A mastery line renders ONLY when the response carried a mastery value. Nothing writes
+              one today, so nothing is claimed — the score and the recording are the whole story. */}
+          {view.masteryLine ? <p className="reading quiz-mastery">{view.masteryLine}</p> : null}
+          <p className="reading">{view.scoreLine}</p>
+          {view.recordedLine ? <p className="reading quiz-recorded">{view.recordedLine}</p> : null}
           <div className="quiz-actions">
             <button type="button" className="primary" onClick={() => setState(restart(state))}>
               Start over

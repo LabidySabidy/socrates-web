@@ -9,7 +9,7 @@
  * Everything degrades: a missing directory yields an empty journal, a malformed log line is
  * counted and skipped, and a filename that is not a session file is refused.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 export interface SessionSummary {
@@ -51,6 +51,18 @@ export function parseSessionFileName(file: string): string | null {
 
 export function isSessionFile(file: string): boolean {
   return parseSessionFileName(file) !== null;
+}
+
+/**
+ * Append one event to the course's log — layer 1, the append-only source of truth.
+ *
+ * socrates-web WRITES here and nowhere else in a course: quiz attempts are course history, and
+ * recording them means an attempt is not lost just because no projection reads it yet.
+ */
+export function appendEvent(courseDir: string, event: Record<string, unknown>): void {
+  const dir = join(courseDir, ".agent", "learning");
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, "events.jsonl"), JSON.stringify(event) + "\n", "utf8");
 }
 
 /** The SESSIONS directory for a course, or null when the course has no learning dir. */
@@ -194,8 +206,7 @@ export function readJournal(courseDir: string, opts: { limit?: number } = {}): J
   return { sessions: sessions.slice(0, limit), events, warnings };
 }
 
-/** One session's markdown, or null when the name is not a session file / does not exist. */
-export function readSessionMarkdown(courseDir: string, file: string): string | null {
+/** One session's markdown, or null when the name is not a session file / does not exist. */export function readSessionMarkdown(courseDir: string, file: string): string | null {
   if (!isSessionFile(file) || basename(file) !== file) return null;
   const dir = sessionsDir(courseDir);
   if (!dir) return null;

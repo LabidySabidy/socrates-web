@@ -89,3 +89,29 @@ export async function generateAssessments(
   }
   return body;
 }
+
+export interface ResultResponse {
+  recorded?: boolean;
+  unit?: number;
+  right?: number;
+  wrong?: number;
+  total?: number;
+  /** Always null today: no projection computes a mastery change from an attempt. */
+  mastery?: string | null;
+  error?: string;
+}
+
+/** Record a completed attempt. History only — the response carries no mastery claim. */
+export async function recordResult(
+  id: string,
+  body: { unit: number; source: string; right: number; wrong: number; total: number; itemIds: string[] },
+): Promise<ResultResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/results`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => ({}))) as ResultResponse;
+  if (!res.ok) return { recorded: false, error: parsed.error ?? `HTTP ${res.status}` };
+  return parsed;
+}
