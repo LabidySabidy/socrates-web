@@ -629,3 +629,7 @@ a.mod:hover { text-decoration: none; }
 }
 .passivity p { margin: 0; }
 .passivity-gate { margin-top: 6px !important; color: var(--ink-55); font-size: 12.5px; }
+
+/* budapest mode — the global stance, as the original header checkbox was */
+.budapest-toggle { display: flex; align-items: center; gap: 6px; color: var(--ink-55); font-size: 12.5px; cursor: pointer; }
+.budapest-toggle input { cursor: pointer; }

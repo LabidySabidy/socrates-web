@@ -375,5 +375,13 @@
       high-contrast and right-aligned. Found while verifying T-048 (a sent explanation left no visible trace).
       **Done when:** the console shows each learner turn, and a sent message is visible without scrolling away
       from the tutor's reply.
-- [ ] **T-049** Budapest mode as a structured `mode` on `POST /api/chat` (REDESIGN). **Done when:** with the
+- [x] **T-049** Budapest mode as a structured `mode` on `POST /api/chat` (REDESIGN). **Done when:** with the
       toggle on, the modifier reaches the server's outgoing prompt while the posted message does not.
+      **Done** — `BUDAPEST_MODIFIER` ported verbatim into `server.ts`; the client sends `mode` and the SERVER
+      injects. A global toggle in the top bar, as the original header checkbox was.
+      **Browser-verified:** the default request body is `{message, course, mode:"default"}` and the Budapest body
+      is `{message:"what is state?", mode:"budapest"}` with the message untouched (`polluted: false`); the server
+      answers `mode: "budapest"`. **Server-verified** that the modifier really is injected, by a mock that echoes
+      the prompt the bridge was handed — 3 tests, including "any other mode value is treated as the default".
+      **Wording deliberately unchanged:** it is programming-specific, and rewriting it would be a content
+      decision rather than a recovery.

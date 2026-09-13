@@ -15,6 +15,8 @@ export function App() {
   const route = useRoute();
   const [data, setData] = useState<CoursesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Global, as the original header checkbox was; the server applies it to the prompt. */
+  const [budapest, setBudapest] = useState(false);
 
   const load = useCallback(() => {
     fetchCourses()
@@ -33,7 +35,7 @@ export function App() {
 
   return (
     <>
-      <TopBar courseCount={data ? visible.length : null} />
+      <TopBar courseCount={data ? visible.length : null} budapest={budapest} onBudapestChange={setBudapest} />
       {route.name === "lab" ? (
         <LabPage
           courseId={route.courseId}
@@ -55,6 +57,7 @@ export function App() {
           courseId={route.courseId}
           unitNumber={route.unit}
           ask={route.ask}
+          budapest={budapest}
           onExit={() => {
             // Back to the originating unit: the route carries it, so position survives the trip.
             window.location.hash = hrefCourse(route.courseId, route.unit).slice(1);

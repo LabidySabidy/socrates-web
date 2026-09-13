@@ -400,6 +400,67 @@ async function bootChat(t: { after(fn: () => Promise<void> | void): void }) {
   return { base: `http://127.0.0.1:${running.port}` };
 }
 
+/**
+ * Boot with chat enabled and a mock that ECHOES the prompt it received, so a test asserts what the
+ * bridge was actually handed rather than what the client believes it sent.
+ */
+async function bootChatRecording(t: { after(fn: () => Promise<void> | void): void }) {
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  const script = join(staticDir, "echo-prompt.mjs");
+  writeFileSync(
+    script,
+    [
+      "const out = (o) => process.stdout.write(JSON.stringify(o) + String.fromCharCode(10));",
+      "process.stdin.setEncoding('utf8');",
+      "let buf = '';",
+      "process.stdin.on('data', (c) => {",
+      "  buf += c;",
+      "  let i;",
+      "  const NL = String.fromCharCode(10);",
+      "  while ((i = buf.indexOf(NL)) !== -1) {",
+      "    const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);",
+      "    if (!line) continue;",
+      "    let cmd; try { cmd = JSON.parse(line); } catch { continue; }",
+      "    if (cmd.type === 'prompt') {",
+      "      out({ type: 'response', command: 'prompt', success: true });",
+      "      out({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'PROMPT:' + cmd.message } });",
+      "      out({ type: 'agent_settled' });",
+      "    }",
+      "  }",
+      "});",
+    ].join(String.fromCharCode(10)),
+  );
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+
+  process.env.PI_BIN = "node";
+  process.env.PI_ARGS = script;
+  const running = await startServer({
+    port: 0,
+    projectDir: BASIC,
+    coursesRoot: FIXTURES,
+    registryPath: join(BASIC, ".agent", "courses.json"),
+    staticDir,
+    chat: true,
+    watch: false,
+  });
+  t.after(async () => {
+    await running.close();
+    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
+    rmSync(staticDir, { recursive: true, force: true });
+  });
+
+  const base = `http://127.0.0.1:${running.port}`;
+  /** What the bridge was handed, read back out of the turn's own stream. */
+  const sent = async (): Promise<string> => {
+    const { lines } = await readStream(`${base}/api/stream`);
+    const delta = lines.find((l) => l.includes("PROMPT:"));
+    assert.ok(delta, `expected the echo in ${JSON.stringify(lines)}`);
+    return (JSON.parse(delta!) as { assistantMessageEvent: { delta: string } }).assistantMessageEvent
+      .delta.replace(/^PROMPT:/, "");
+  };
+  return { base, sent };
+}
+
 /** Read an SSE body to completion and return the data lines. */
 async function readStream(url: string): Promise<{ status: number; lines: string[] }> {
   const res = await fetch(url);
@@ -725,6 +786,47 @@ test("a generated interactive that fails validation is refused, not half-served"
   assert.match(body.error, /did not produce a usable interactive/);
   assert.match(body.detail, /no JSON block/);
   assert.equal(body.interactives, undefined, "no partial result");
+});
+
+test("budapest ships as a mode: the server injects it, the message stays clean", async (t) => {
+  // The original concatenated the modifier onto the message (app.js:184), polluting the prompt, the
+  // transcript and the event log. The mode travels separately now.
+  const { base, sent } = await bootChatRecording(t);
+
+  const res = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "what is state?", mode: "budapest" }),
+  });
+  const body = await res.json();
+  assert.equal(body.mode, "budapest");
+
+  const prompt = await sent();
+  assert.ok(prompt.startsWith("what is state?"), "the message comes first, unpolluted: " + prompt);
+  assert.ok(prompt.includes("[BUDAPEST MODE ACTIVE]"), "the modifier is present");
+  assert.match(prompt, /Forbid lecturing, definitions, or syntax explanations/);
+  assert.match(prompt, /Force them to struggle/);
+});
+
+test("without the mode the prompt is exactly the message", async (t) => {
+  const { base, sent } = await bootChatRecording(t);
+  await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "what is state?" }),
+  });
+  assert.equal(await sent(), "what is state?", "no modifier, no pollution");
+});
+
+test("any other mode value is treated as the default", async (t) => {
+  const { base, sent } = await bootChatRecording(t);
+  const res = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "hi", mode: "whatever" }),
+  });
+  assert.equal((await res.json()).mode, "default");
+  assert.equal(await sent(), "hi");
 });
 
 test("static files are served and path traversal is refused", async (t) => {

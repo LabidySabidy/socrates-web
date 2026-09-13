@@ -13,7 +13,18 @@ export function Emblem() {
   );
 }
 
-export function TopBar({ courseCount, right }: { courseCount: number | null; right?: ReactNode }) {
+export function TopBar({
+  courseCount,
+  budapest,
+  onBudapestChange,
+  right,
+}: {
+  courseCount: number | null;
+  /** Global, as the original header checkbox was. */
+  budapest: boolean;
+  onBudapestChange: (value: boolean) => void;
+  right?: ReactNode;
+}) {
   return (
     <header className="topbar">
       <a className="brand" href={hrefHome()}>
@@ -24,6 +35,15 @@ export function TopBar({ courseCount, right }: { courseCount: number | null; rig
         {courseCount === null ? "loading…" : `${courseCount} course${courseCount === 1 ? "" : "s"}`}
       </span>
       <span className="spacer" />
+      <label className="budapest-toggle" title="Forbid lecturing; force struggle before documentation">
+        <input
+          type="checkbox"
+          checked={budapest}
+          onChange={(e) => onBudapestChange(e.target.checked)}
+          aria-label="Budapest mode"
+        />
+        Budapest Mode
+      </label>
       {right}
     </header>
   );

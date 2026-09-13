@@ -57,6 +57,21 @@ import {
   writeCache as writeInteractiveCache,
 } from "./interactives.ts";
 
+/**
+ * Budapest mode, ported VERBATIM from `06cee66^:public/app.js:17-20`.
+ *
+ * The original concatenated this onto the learner's message text, so the server, the transcript and
+ * the event log all saw a polluted prompt. It now travels as a structured `mode` and the SERVER
+ * injects it, so the message a learner sent stays the message in the record.
+ *
+ * The wording is deliberately unchanged: it is programming-specific, and rewriting it would be a
+ * content decision rather than a recovery.
+ */
+export const BUDAPEST_MODIFIER =
+  "[BUDAPEST MODE ACTIVE] Forbid lecturing, definitions, or syntax explanations. " +
+  "Place a difficult, counter-intuitive programming problem or logical paradox in front of the user. " +
+  "Force them to struggle and attempt a solution before revealing any documentation.";
+
 export interface ServerOptions {
   port?: number;
   /** The default course. Also the fallback scan doesn't apply if COURSES_ROOT is set. */
@@ -900,6 +915,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         const parsed = JSON.parse((await readBody(req)) || "{}") as {
           message?: unknown;
           course?: unknown;
+          mode?: unknown;
         };
         const message = typeof parsed.message === "string" ? parsed.message : "";
         if (!message) {
@@ -933,12 +949,19 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         if (killedTurn) finalize("error", `course switched to ${ref.id} mid-turn`);
         const switched = bridge.switchCourse(ref.dir).switched;
 
+        // The mode is applied HERE, not by the client, so `message` stays exactly what the learner
+        // typed while the tutor still receives the instruction.
+        const budapest = parsed.mode === "budapest";
+        const prompt = budapest ? `${message}
+
+${BUDAPEST_MODIFIER}` : message;
+
         turnLines = [];
         settled = false;
         turnCourse = ref.id;
         ensureBridgeWired();
-        const accepted = bridge.send({ type: "prompt", message });
-        sendJson(res, 200, { accepted, course: ref.id, switched, killedTurn });
+        const accepted = bridge.send({ type: "prompt", message: prompt });
+        sendJson(res, 200, { accepted, course: ref.id, switched, killedTurn, mode: budapest ? "budapest" : "default" });
       } catch (err) {
         sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid body" });
       }

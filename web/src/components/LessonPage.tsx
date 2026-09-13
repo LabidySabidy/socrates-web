@@ -41,12 +41,15 @@ export function LessonPage({
   courseId,
   unitNumber,
   ask,
+  budapest = false,
   onExit,
 }: {
   courseId: string;
   unitNumber: number;
   /** A prompt to dispatch on arrival — how a tray or rail click starts a grill. */
   ask?: string | null;
+  /** Budapest mode: the SERVER injects the modifier, so the message stays unpolluted. */
+  budapest?: boolean;
   onExit: () => void;
 }) {
   const [tree, setTree] = useState<CourseTree | null>(null);
@@ -155,8 +158,10 @@ export function LessonPage({
       res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // The course travels with the prompt: it decides which directory the tutor runs in.
-        body: JSON.stringify({ message, course: courseId }),
+        // The course travels with the prompt: it decides which directory the tutor runs in. Budapest
+        // travels as a MODE, not as text appended here — the original concatenated it onto the
+        // message (app.js:184), which polluted the prompt, the transcript and the event log.
+        body: JSON.stringify({ message, course: courseId, mode: budapest ? "budapest" : "default" }),
       });
     } catch {
       setError("could not reach the server");
