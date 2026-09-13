@@ -5,6 +5,8 @@ import {
   parsePlan,
   parseSchema,
   parseLearning,
+  severityState,
+  isSeverity,
 } from "./learning-parser.ts";
 
 test("parseMission extracts destination / artifact / driving project", () => {
@@ -70,6 +72,38 @@ test("parseSchema extracts concepts, badges, sm2, due, misconceptions", () => {
   assert.equal(s.misconceptions.length, 2);
   assert.equal(s.misconceptions[0].status, "resolved");
   assert.equal(s.misconceptions[1].status, "open");
+  // 6-column rows (no severity column) must still parse as unrated.
+  assert.equal(s.misconceptions[0].severity, "");
+  assert.equal(s.misconceptions[0].severityState, "resolved");
+  assert.equal(s.misconceptions[1].severityState, "unrated");
+});
+
+test("parseSchema reads severity from the 7th column", () => {
+  const s = parseSchema(`
+## 3. Misconception Registry
+| MIS-001 | react-state | thought X | | open | 2026-01-01 | root |
+| MIS-002 | lifecycle | believed Y | | open | 2026-02-01 | edge |
+| MIS-003 | hooks | believed Z | | resolved | 2026-03-01 | partial |
+| MIS-004 | fiber | believed W | | open | 2026-04-01 | |
+| MIS-005 | effects | believed V | | open | 2026-05-01 | not-a-severity |
+`);
+  assert.deepEqual(
+    s.misconceptions.map((m) => m.severity),
+    ["root", "edge", "partial", "", ""],
+  );
+  assert.deepEqual(
+    s.misconceptions.map((m) => m.severityState),
+    ["root", "edge", "resolved", "unrated", "unrated"],
+  );
+});
+
+test("severityState: resolution outranks a stale rating; blanks are unrated", () => {
+  assert.equal(severityState("resolved", "root"), "resolved");
+  assert.equal(severityState("open", ""), "unrated");
+  assert.equal(severityState("open", undefined), "unrated");
+  assert.equal(isSeverity("partial"), true);
+  assert.equal(isSeverity("unrated"), false, "unrated is derived, not storable");
+  assert.equal(isSeverity("resolved"), false, "resolved is a status, not a severity");
 });
 
 test("parsePlan preserves an empty 'why' column without shifting", () => {

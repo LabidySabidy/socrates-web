@@ -13,3 +13,281 @@
 - Vendor a setup script that installs pi locally — turnkey-ish, but an extra step beyond plain `npm install`.
 
 **Tradeoffs:** Sacrifices the zero-dependency principle (~165 packages pulled in). Accepted because turnkey distribution outweighs the aesthetic constraint; Node built-ins still handle all HTTP/parsing/watching.
+
+## 2026-09-13 — Learning state is event-sourced, and the log is per course
+
+**Context:** `SCHEMA.md` is explicitly mutation-in-place ("never delete cards; mutate the badge, fields, and
+JSON telemetry blocks in place"). It therefore stores current mastery and **no history** — so "continue
+where you left off" had nothing real to read, and the handoff had to fabricate a 40% figure. Separately, a
+misconception-persistence defect (DEF-001) proved the danger of a single destructively-edited store: the
+write path is fire-and-forget on a voluntary `<learning-telemetry>` block, and when a session emitted none,
+nothing was written and nothing was logged. Any writer bug is permanent data loss.
+
+**Decision:** Three layers, all flat files, per course:
+
+| Layer | Artifact | Written by | Authority |
+|---|---|---|---|
+| 0 raw transcript | pi's `sessions/*.jsonl` (already exists) | pi | ground truth, never edited |
+| 1 event log | `<course>/.agent/learning/events.jsonl`, append-only | extension, deterministic | one line per event, never rewritten |
+| 2 projections | `SCHEMA.md` (current state), `SESSIONS/<date>-<slug>.md` (journal) | derived from layer 1 | rebuildable, disposable |
+
+Layer 1 starts with `session_start` / `session_end` events written from `ctx.sessionManager` on the
+`session_start` / `agent_end` / `session_shutdown` hooks — no model cooperation required, so a session
+record always exists. Rich events (badge changes, misconception open/resolve) come from the tutor; when they
+are absent while grill activity occurred, a `telemetry_missing` event is appended so the gap is recorded
+rather than silent.
+
+**Alternatives considered:**
+- Minimal single layer — write `SESSIONS/<date>.md` at session end, leave `SCHEMA.md` as the only state.
+  ~80% of the value, ~30% of the work; rejected because it keeps mutation-in-place risk and still cannot
+  reconstruct history, and per-unit history is required by the Platform UI anyway.
+- Centralised log next to pi's sessions — rejected; a course should stay self-contained and portable.
+
+**Tradeoffs:** One extra append-only file and a derive step, in exchange for never losing learning history
+to a write bug, dedupe/upsert moving to the projection layer, and a real source for the Cockpit's session
+rail. Misconception history and corrections become queryable instead of overwritten.
+
+## 2026-09-13 — A course may be topic-anchored or codebase-anchored
+
+**Context:** The handoff's catalogue is subject-based (Algebra, Biology), but the only real learning
+missions on this machine are anchored to a codebase — `DriftScout`'s mission is "build an admin post
+authorization system into DriftScout". The user explicitly wants to ask about a codebase rather than a
+subject. This also resolves an open question from the handoff analysis: nothing on disk authors quizzes,
+hints, or interactives, so screens D and E had no content source.
+
+**Decision:** `course.kind` is either `topic` or `codebase`, and it selects where assessment and interactive
+material is grounded. For a `codebase` course, primary sources are real repo artifacts (file paths, diffs,
+migrations) and generated quizzes/interactives must cite them. Nothing is invented.
+
+**Alternatives considered:** Treat every course as a subject and keep assessments purely generated —
+rejected; it produces unverifiable content and contradicts the project's evidence rule.
+
+**Tradeoffs:** The generator must be able to read the repo (the pi bridge already runs with `cwd` set to the
+course directory, so this is available). Adds a `kind` discriminator and per-kind generation prompts.
+
+## 2026-09-13 — Content model: derived default, optional authored override
+
+**Context:** The handoff's IA is Course → Units → Lessons → Modules. The real content on disk is
+`MISSION.md` / `PLAN.md` / `SCHEMA.md`, and spike evidence showed there is no machine-readable link from a
+PLAN phase to a SCHEMA concept — prose matching recovered 2 of 5 concepts in one project and 0 of 4 in
+another (which has no roadmap section at all). Deriving units from phases is guessing. Deriving units from
+concept cards is exact, works in both real projects, and needs zero invented data.
+
+**Decision:** Two-tier content model. Derive the tree by default so **any** existing `.agent/learning`
+directory renders with zero new files; allow an optional `COURSE.md` manifest to override it.
+
+Precedence: `COURSE.md` manifest **>** derived tree.
+
+Derivation rules (documented in `docs/CONTENT-MODEL.md`):
+
+| Level | Derived from | Rule |
+|---|---|---|
+| Course | the learning directory | `id` = directory name; `title` = MISSION "I will be able to"; `kind` defaults to `topic` |
+| Unit | one per SCHEMA.md concept card | `title` = card heading name; mastery = the card's badge; aggregate = mean of member rings |
+| Lesson | the concept card itself | definition, connections, SM-2 telemetry, misconceptions |
+| Module | derived study actions per lesson | `recite` (grill), `review` (SM-2 due), `explain` (Feynman), `misconceptions` (count) |
+| Course context | MISSION + PLAN | rendered as "About this course" and the mission anchor — never as units |
+
+`COURSE.md` may declare explicit lesson groups, module order, module types, assessment placement, and
+`kind: codebase`. Absent a manifest, the derivation above is authoritative.
+
+**Alternatives considered:** Manifest-only (explicit but every existing directory needs a new file, and
+existing projects break) — rejected. Derive units from PLAN phases (spike-disproved) — rejected.
+
+**Tradeoffs:** The derived tree cannot express the handoff's richer structure (lesson groups with headings,
+quizzes interleaved between groups) — that requires a `COURSE.md`, which is exactly the escape hatch. The
+derivation must stay small and documented so it cannot drift into heuristics.
+
+**Downstream constraint:** `DriftScout` must render immediately with zero new files, as the derivation's
+regression fixture. It is a rendering fixture, not a course to continue (its session backfill was scrapped).
+
+## 2026-09-13 — Add-a-course: scan-first, registry overlay, API/UI path
+
+**Context:** Today one `PROJECT_DIR` env var binds exactly one course. The handoff has a course switcher and
+a catalogue but no way to add a course. Spike B proved `parseLearning(dir)` is already directory-agnostic and
+that both a scan and a registry file can enumerate multiple real courses.
+
+**Decision:** Ship all three mechanisms, scan as the zero-config default:
+
+1. **Scan** — `COURSES_ROOT` env (default: parent directory of `PROJECT_DIR`), scanned **one level deep** for
+   `*/.agent/learning` → auto-discovered courses. Honours an ignore list.
+2. **Registry overlay** — `.agent/courses.json` can pin, order, label, hide, or add courses outside the scan
+   root.
+3. **API/UI** — `POST /api/courses` registers or unregisters a course by writing the registry, so the UI can
+   offer an "Add course" form.
+
+**Alternatives considered:** Registry-only (explicit, but zero-config is lost) — rejected. Filesystem scan
+alone (no way to hide a stray repo or pin order) — rejected.
+
+**Tradeoffs:** Scanning a large parent directory is implicit magic and touches every sibling directory; it is
+bounded to one level and cheap (one `stat` per directory), and the ignore list plus the registry's `hidden`
+flag are the escape hatches. Windows path handling must go through the existing helpers (GL-001).
+
+## 2026-09-13 — Multi-course bridge: one pi process, restarted on course switch
+
+**Context:** The bridge spawns `pi --mode rpc` with `cwd = PROJECT_DIR`. That cwd *is* which course the tutor
+can read and write. Multiple courses therefore force a decision, and pi is memory-heavy (~1GB observed).
+
+**Decision:** Keep **one** pi process. On course switch: kill the whole process tree (`taskkill /T` on Windows,
+as `kill()` already does), then warm-spawn for the new course so the first prompt is not cold.
+
+**Alternatives considered:** One process per course, lazily spawned and kept alive — rejected on memory; n
+concurrent courses would mean n resident ~1GB processes. A single process with a switched `cwd` mid-flight —
+rejected; pi resolves paths and project trust against its startup cwd.
+
+**Tradeoffs:** Per-course conversational context is lost on switch. Accepted as desirable: it keeps each
+course's tutoring session clean and matches the session-journal model, where a course's history lives in its
+own event log rather than in one long-lived agent context. A switch during an active turn must kill the
+stream and surface it to the client instead of silently dropping tokens.
+
+## 2026-09-13 — Retention score is derived, and labelled as an estimate
+
+**Context:** The Cockpit mock shows "82% durable retention". Nothing in `SCHEMA.md` backs that number, and an
+earlier decision rejected fabricating it. But the SM-2 fields (`repetitions`, `ease_factor`, `interval`) do
+carry real signal about memory strength.
+
+**Decision:** Derive a memory-strength estimate from the SM-2 fields and label it **"Memory strength (SM-2
+estimate)"** everywhere it appears. Never call it durable retention. Keep the raw SM-2 panel (`last_tested` /
+`next_review` / `interval` / `ease_factor` / `repetitions`) and the misconception tray visible alongside it,
+so the estimate is always auditable against its inputs.
+
+**Alternatives considered:** Drop the score (safest, loses the Cockpit's most legible telemetry) — rejected
+once an honest label plus visible inputs were on the table.
+
+**Tradeoffs:** A single number invites over-reading regardless of its label; the formula must be documented,
+monotone in its inputs, and must render "insufficient data" rather than 0% when no reviews exist.
+
+## 2026-09-13 — Frontend: Vite + React + TypeScript (breaks the no-build rule)
+
+**Context:** The project shipped as Node-24-native no-build: `server.ts` serves `public/` statically and the
+UI is hand-rolled vanilla DOM. The handoff requires five screens, a quiz state machine with hints, a
+mastery-gate modal, toasts, a collapsible lesson rail, and two canvas interactives. This is the same class of
+trade as the pi-bundling decision: a founding constraint traded for delivery.
+
+**Decision:** Vite + React + TypeScript for the UI. The Node server stays the API. Vite builds static assets
+and the Node server serves them; in development the Vite server proxies `/api` to Node. Design tokens from
+the handoff become CSS custom properties (Tailwind optional, not required). Port layout, tokens, copy, and
+behavior — never the mockup's inline styles or the `support.js` template runtime.
+
+**Alternatives considered:** Stay vanilla and grow `app.js` — rejected; six views plus a quiz state machine
+is past where hand-rolled DOM pays off, and the handoff explicitly says to use real components. Angular —
+rejected as heavier than the task needs.
+
+**Tradeoffs:** Introduces a build step and a dev/prod asset split, undoing the "no build step" property that
+`PLAN.md` and `DECISIONS.md` previously treated as a feature. `npm test` (node:test) stays for the server; the
+frontend adds `tsc --noEmit` + `vite build` to the acceptance gates per `STANDARDS.md` (TypeScript row).
+
+## 2026-09-13 — Assessments: authored when present, pi-generated otherwise
+
+**Context:** `find` across both real learning directories returned only `MISSION.md`, `PLAN.md`, `SCHEMA.md`
+and telemetry files — no quiz items, no hints, no step solutions. The handoff's Quiz/Unit-test screens
+therefore have no content source. Generating them blindly would produce unverifiable items.
+
+**Decision:** Authored wins when present: if `COURSE.md` declares quiz / unit-test items, use them. Otherwise
+generate on demand via pi under a structured-output contract (question, choices-or-answer, hints,
+step-by-step solution), **validate before serving**, then cache the validated item. For `kind: codebase`
+courses, generated items must cite real repo artifacts. Derivation/generation is the default so authorless
+courses work.
+
+**Alternatives considered:** Generated-only (unverifiable content, no citation possible) — rejected.
+Authored-only (every course needs a hand-written item bank before it can show a quiz) — rejected.
+
+**Tradeoffs:** Depends on the content model and on the tutor producing schema-valid JSON; invalid generations
+must fail loudly and be re-requested rather than half-rendered. Cached items need a home in the course
+directory, which ties into the event log's projection layer.
+
+## 2026-09-13 — API shape: resource routes, no version prefix, `/api/learning` kept as an alias
+
+**Context:** The public shape today is `GET /api/learning`, `POST /api/chat`, `GET /api/stream`, `GET /health`.
+Multi-course needs per-course addressing; the handoff analysis flagged versioning as an open question.
+
+**Decision:** Add resource routes without a version prefix:
+
+```
+GET  /api/courses                  → discovered + registered courses
+GET  /api/courses/:id              → course tree (units → lessons → modules)
+GET  /api/courses/:id/learning     → raw LearningData for that course
+POST /api/courses                  → register / unregister (writes .agent/courses.json)
+GET  /api/learning                 → ALIAS for the default course (unchanged shape)
+```
+
+`/api/chat` and `/api/stream` gain an optional course selector but keep their existing behavior when it is
+omitted. No `/api/v1` — we own the only client; version deliberately later if a second client appears.
+
+**Alternatives considered:** `/api/v1/...` from the start — rejected as ceremony with one client. Nested
+`/api/courses/:id/units/:n` routes now — rejected until the UI actually needs per-unit fetches.
+
+**Tradeoffs:** Keeping `/api/learning` as an alias means two paths serve nearly the same payload until the
+old dashboard is retired. The alias must be deleted when the vanilla UI is replaced (tracked as a task, not a
+comment).
+
+## 2026-09-13 — Misconception severity: tutor-emitted, three ratings, two derived display states
+
+**Context:** The registry can hold several rows for one id (reproduced live: `MIS-003` ×3 in `learning-demo`),
+and a learner must never be shown duplicates. But deleting rows is the one operation that can destroy real
+content, because a duplicate row is indistinguishable from an authored row by id alone. Separately, the tray
+had no way to distinguish a wrong core mental model from an isolated slip.
+
+**Decision:**
+
+- **Display collapses to one row per id** (P2). The backend `duplicate-registry-row:<id>` warning **stays** —
+it is an invisible data-integrity signal, not a learner-facing display.
+- **`severity` is tutor-emitted**, as an optional `record_learning` field and the 7th registry column:
+`root` (alarm `#c83f3f`) · `partial` (warning `#d97706`) · `edge` (gold `#d4a72c`). Blank means unrated
+(neutral). `resolved` (`#c9c6bd`) and `unrated` are **derived display states, never stored**:
+
+  ```
+  severityState = status === "resolved" ? "resolved" : (severity || "unrated")
+  ```
+
+- **Never inferred from the misconception prose.** Unrated must stay honest; deriving a rating from text is
+invented data.
+- **Updatable on re-assessment**, exactly like the corrected cell. An event that omits the field does not
+clear a rating recorded earlier — only an explicit value overwrites.
+- **A separate scale from mastery.** Severity describes *how a belief is wrong*; mastery describes *how well
+a concept is known*. Rendered as a dot + label, colour as stroke, never fill.
+- **Shared format.** The extension projection (`schema.ts`) and socrates-web's `learning-parser.ts` both
+implement it and land together, along with the SCHEMA template.
+
+**Alternatives considered:**
+- Derive severity from the prose — rejected; it would fabricate ratings and contradict the evidence rule.
+- Store all five values including `resolved`/`unrated` — rejected; two sources of truth for one state, and
+  resolution must outrank a stale rating.
+- Auto-dedupe registry rows — rejected; a duplicate is indistinguishable from authored content by id alone.
+
+**Tradeoffs:** The 7-column migration mutates the header and separator of existing registry tables. It is
+guarded to exactly the known 6-column shape, additive only (never removes a column or rewrites a cell),
+one-shot, and reported as `registry-migrated-to-7-columns`. Early trays will be mostly `unrated` until a
+tutor rates a misconception — accepted as the honest default over guessing.
+
+**Flagged, deliberately not built:** a *derived* persistence signal — review cycles survived — rendered as a
+small tick (never a colour). Behaviourally grounded, so honest to derive. No code until asked.
+
+**Supersedes:** showing duplicates in the misconception tray.
+
+## 2026-09-13 — P0 is a separate workstream in `pi-agent-harness`, not a socrates-web phase
+
+**Context:** P0 changes global extensions, which run in **every** project's pi session. The user asked for it
+to be a deliberate, separate workstream. While grilling this, `~/.pi` turned out to be a git repo
+(`pi-agent-harness`, remote `LabidySabidy/pi-agent-harness`) with `agent/extensions/learning-state-manager.ts`
+already tracked — so the premise that extension code sits outside version control was false.
+
+**Decision:** P0 is its own workstream, committed in the `pi-agent-harness` repo. No symlink or junction is
+needed, because the load path and the versioned path are the same path. Tests live beside the source in
+`agent/extensions/` and run with `node --test "agent/extensions/**/*.test.ts"` (Node 24 strips types; `~/.pi`
+has no package.json, and doesn't need one). Pure logic is extracted into pi-free modules so it is testable
+without the extension runtime — the existing convention (`telemetry/buckets.ts`). Verification requires a
+fresh pi session (GL-013).
+
+**Alternatives considered:**
+- Junction/symlink from a versioned directory into `~/.pi/agent/extensions/` — unnecessary since the source
+  is already versioned, and it adds a link to maintain. Empirically validated as safe anyway
+  (`readdirSync(withFileTypes)` reports a junction as `isSymbolicLink: true`, and pi's loader accepts
+  `isSymbolicLink()` for files and directories at `loader.js:584,592`), so it remains available if the source
+  ever moves out of `~/.pi`.
+- Vendoring a copy into socrates-web — rejected; socrates-web is one app, the extensions serve every project,
+  and a copy would drift.
+
+**Tradeoffs:** P0 now spans two repos, so socrates-web's `npm test` cannot cover it and there is no single
+command that gates everything. Mitigated by the documented test command above and by keeping the extension
+tests self-contained. Also means P0 lands as a `pi-agent-harness` commit, reviewed on its own terms.

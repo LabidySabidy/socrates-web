@@ -16,6 +16,50 @@ export const BADGE_LABEL: Record<Badge, string> = {
   "🟦": "Mastered",
 };
 
+/**
+ * Misconception severity — shared format with the learning extension.
+ *
+ * Three ACTIVE ratings may be stored; `resolved` and `unrated` are display states derived
+ * from status + emptiness. Distinct from the mastery scale: severity describes how a belief
+ * is wrong, mastery describes how well a concept is known.
+ *
+ * Severity is tutor-emitted. It is never inferred from the misconception prose — a blank
+ * cell means unrated, and that must stay honest.
+ */
+export const SEVERITIES = ["root", "partial", "edge"] as const;
+export type Severity = (typeof SEVERITIES)[number];
+export type SeverityState = Severity | "resolved" | "unrated";
+
+export const SEVERITY_LABEL: Record<SeverityState, string> = {
+  root: "Root",
+  partial: "Partial",
+  edge: "Edge",
+  resolved: "Resolved",
+  unrated: "Unrated",
+};
+
+/** Colour is applied as a stroke (dot + label), never a fill — per the design system. */
+export const SEVERITY_COLOR: Record<SeverityState, string | null> = {
+  root: "#c83f3f",
+  partial: "#d97706",
+  edge: "#d4a72c",
+  resolved: "#c9c6bd",
+  unrated: null,
+};
+
+export function isSeverity(v: unknown): v is Severity {
+  return typeof v === "string" && (SEVERITIES as readonly string[]).includes(v);
+}
+
+/** Collapse the stored pair into the five-state display value. */
+export function severityState(
+  status: "open" | "resolved",
+  severity: Severity | "" | undefined,
+): SeverityState {
+  if (status === "resolved") return "resolved";
+  return severity && isSeverity(severity) ? severity : "unrated";
+}
+
 export interface Sm2 {
   last_tested: string;
   next_review: string;
@@ -39,6 +83,10 @@ export interface Misconception {
   corrected: string;
   status: "open" | "resolved";
   date: string;
+  /** `""` when the 7th column is blank or absent — backward compatible with 6-column tables. */
+  severity: Severity | "";
+  /** The five-state display value, derived so the UI never re-implements the rule. */
+  severityState: SeverityState;
 }
 
 export interface SequenceItem {
@@ -200,13 +248,18 @@ export function parseSchema(text: string): {
     if (!/^\| MIS-\d+ \|/.test(t)) continue;
     const cells = parseMarkdownRow(t);
     if (cells.length >= 5) {
+      const status: "open" | "resolved" = cells[4] === "resolved" ? "resolved" : "open";
+      const rawSeverity = (cells[6] ?? "").trim();
+      const severity: Severity | "" = isSeverity(rawSeverity) ? rawSeverity : "";
       misconceptions.push({
         id: cells[0],
         concept: cells[1],
         misconception: cells[2],
         corrected: cells[3] ?? "",
-        status: cells[4] === "resolved" ? "resolved" : "open",
+        status,
         date: cells[5] ?? "",
+        severity,
+        severityState: severityState(status, severity),
       });
     }
   }
