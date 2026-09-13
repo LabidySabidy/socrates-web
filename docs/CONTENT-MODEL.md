@@ -63,8 +63,9 @@ surfaced in the UI, not swallowed.
 | `unknown-lesson:<name>` | manifest references a nonexistent card | reference preserved with `missing: true`; never invented |
 | `manifest-duplicate:<title>` | two manifest units share a title | both kept; the collision is reported |
 
-Discovery adds its own: `courses-root-missing`, `courses-root-unreadable:<dir>`,
-`registry-invalid:<reason>`, `registry-dir-not-a-course:<dir>`, `duplicate-course-id:<id>`.
+Starting a course adds `duplicate-course-id:<id>` when a subject's slug is already taken. (The scan
+and registry warnings — `courses-root-missing`, `registry-invalid:<reason>` and the rest — went with
+the discovery stack.)
 
 ## `COURSE.md` manifest grammar
 
@@ -171,37 +172,37 @@ tutor session runs in this course."* It never claims a badge moved.
 factor, and no such rule is defined anywhere in this project for a quiz attempt — the tutor's
 telemetry owns those fields. Inventing one here would be a fabricated scheduling rule.
 
-## Discovery — scan first, registry overlay
+## The store — a course is a subject
 
-1. **Scan** `COURSES_ROOT` (default: the parent of `PROJECT_DIR`) **one level deep** for
-   `*/.agent/learning`. The default course itself is always included. Zero config.
-2. **Registry** (`.agent/courses.json`) may pin (`order`), label, hide, or add courses outside the
-   scan root, and carries an `ignore` list of directory names or paths.
+A course is created, not discovered. `~/.socrates/courses/<slug>/` is the whole layout, and the slug
+comes from the learner's own words (lowercased, non-alphanumerics to `-`, ≤64 characters).
 
-Metadata precedence: registry entry > mission destination > directory name. `hidden: true` removes a
-course from the catalogue without touching disk. Duplicate directory basenames are disambiguated
-(`Dup`, `Dup-2`) with a warning — never silently merged.
+```
+~/.socrates/courses/<slug>/.agent/learning/
+  MISSION.md   the destination in the learner's own words
+  PLAN.md      the syllabus the tutor scaffolds with them
+  SCHEMA.md    concept cards + the misconception registry
+  events.jsonl append-only learning events (authoritative)
+  SESSIONS/    derived session records
+```
+
+There is **no scan root, no registry file and no folder browser**. Nothing enumerates the filesystem,
+so a course cannot exist without having been started, and no directory a learner happens to own can be
+mistaken for one. `SOCRATES_HOME` overrides the store root (tests point it at a temp dir).
+
+A course's title is its mission destination, falling back to the directory name — the learner's words
+rather than a label someone typed into a config file.
 
 ## API
 
 ```
-GET  /api/courses                -> { root, registry, warnings, courses[] }
+GET  /api/courses                -> { root, warnings, courses[] }
 GET  /api/courses/:id            -> CourseTree
 GET  /api/courses/:id/learning   -> raw LearningData
-POST /api/courses                -> { dir, action?: register|unregister|hide|unhide, label?, order? }
-GET  /api/learning               -> ALIAS for the default course; shape unchanged
+POST /api/courses                -> { subject } creates the course, seeds MISSION.md, returns its id
+GET  /api/learning               -> REMOVED; 404 pointing at /api/courses/:id/learning
 ```
 
-`POST` refuses a directory that is not a course (`not a course directory (no .agent/learning)`).
-Unregister edits the registry only — the course on disk is never touched.
+`POST` refuses an empty or unusable subject, and refuses one whose slug is already taken rather than
+reusing or overwriting the existing course.
 
-### `unregister` vs `hide` — they are not the same thing
-
-| Action | Effect | Reversible |
-|---|---|---|
-| `unregister` | removes the **registry entry**. A course living under `COURSES_ROOT` is then re-found by the scan. | re-register |
-| `hide` | sets `hidden: true` / adds to `ignore`, so it leaves the **catalogue**. | `unhide` |
-
-So "remove this course from the list" is `hide`, not `unregister`. When `unregister` leaves a course still
-discoverable by the scan, the response includes `stillDiscovered: true` and a `hint` — the client should offer
-`hide` rather than appear to have done nothing.

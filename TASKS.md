@@ -3,6 +3,11 @@
 > Status: `[ ]` todo · `[x]` done. Stop after each phase for review.
 > Phase order and rationale: `PLAN.md`. Decisions: `DECISIONS.md`. Design resolutions:
 > `.agent/grill/socrates-persistence-and-cutover.md`.
+>
+> **`[x]` is history, not current behaviour.** P16 (a course is a subject, not a folder) DELETED some
+> tasks marked done here, whose code is no longer in the tree: **T-011**'s `kind`, **T-013**, **T-014**'s
+> scan/registry routes, **T-041** and **T-044**. Each carries an inline note at its own entry; the
+> supersede record for the decisions behind them is in `DECISIONS.md`.
 
 ## P0 — Telemetry durability: DEF-001 fix + session store
 
@@ -74,6 +79,8 @@
       MISSION.md, duplicate concept names, unknown badge, and a `COURSE.md` naming a nonexistent card.
       **Done** — `course-model.ts` + 17 tests; all seven edges covered, plus a nonexistent course directory.
 - [x] **T-011** `COURSE.md` override parser (lesson groups, module order/types, assessment placement, `kind`).
+      **PARTLY REMOVED (P16):** the `kind` field is gone with the codebase kind. Lesson groups, module
+      order and module types remain.
       **Done when:** a manifest overrides the derived tree and `manifest > derived` precedence is tested.
       **Done** — `parseCourseManifest()`; a malformed manifest falls back to the derivation with
       `manifest-invalid:<reason>` instead of producing a half-built tree. `@concept` refs attach mastery;
@@ -82,7 +89,8 @@
       **Done when:** a test asserts every badge maps, and an unknown badge renders `Not started` + warning.
       **Done** — `MASTERY_BY_BADGE` / `masteryOf` / `aggregateMastery` / `countByMastery`; exactly five states
       asserted, unknown badge reads Not started, aggregate never divides by zero.
-- [x] **T-013** `courses.ts` — `COURSES_ROOT` scan (one level), `.agent/courses.json` overlay
+- [x] ~~**T-013** `courses.ts` — `COURSES_ROOT` scan (one level), `.agent/courses.json` overlay~~
+      **REMOVED (P16):** `courses.ts` and its tests are deleted; the store replaces them. Kept as history.
       (pin / order / label / hide / add), ignore list. **Done when:** tests cover scan discovery, hide, pin order,
       and a registry entry outside the scan root.
       **Done** — 14 tests, each against its own throwaway root. Missing root, corrupt registry, unreadable
@@ -306,7 +314,9 @@
       **SM-2 deliberately untouched:** an interval is a function of the previous interval and ease factor, and no
       such rule for a quiz attempt is defined anywhere in this project — inventing one would be a fabricated
       scheduling rule. The tutor's telemetry owns those fields.
-- [x] **T-041** A "start a course" affordance.
+- [x] ~~**T-041** A "start a course" affordance.~~
+      **REMOVED (P16):** the not-initiated list it attached to is gone, and writing `MISSION.md` into a
+      project directory is superseded by `POST /api/courses { subject }` + the scaffold interview.
       **Done** — each not-initiated entry in "Add or manage" now offers **Start course**, which opens a small
       form and writes `MISSION.md` from the user's OWN words (destination required; artifact optional). The
       scaffold skill can enrich the rest of the mission later. It never overwrites an existing mission, an
@@ -316,8 +326,11 @@
       destination, the submit button stays disabled until the destination is non-empty, and the file on disk
       carries the typed words with `<fill in later>` for the blank field. 2 unit tests cover the refusals
       (empty destination, no learning dir, already initiated).
-- [x] **T-044** A UI-started course has `MISSION.md` only, so it renders **0 units** until the scaffold skill
-      writes `PLAN.md`/`SCHEMA.md`. That is correct, but from the catalogue it looks broken.
+- [x] ~~**T-044** A UI-started course has `MISSION.md` only, so it renders **0 units** until the scaffold
+      skill writes `PLAN.md`/`SCHEMA.md`. That is correct, but from the catalogue it looks broken.~~
+      **REMOVED (P16):** its "started, but not scaffolded" copy covered a course that had been *found*
+      rather than started. A course now begins at the interview, and the empty-*library* state names the
+      next action instead (see the empty-state copy in `HomePage.tsx`). Kept as history.
       **Done** — the catalogue card reads "Started, but not scaffolded yet — the tutor writes the concept cards
       with you" with the footer "Not scaffolded yet" instead of "0 units"; the unit rail says there are no units
       and offers the path; the pane explains WHY (units are derived from concept cards), says this is a normal

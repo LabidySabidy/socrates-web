@@ -49,6 +49,10 @@ rail. Misconception history and corrections become queryable instead of overwrit
 
 ## 2026-09-13 — A course may be topic-anchored or codebase-anchored
 
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. There is no `course.kind`: a course is a subject the learner names, so no course is
+anchored to a repository and no generated item is grounded in a real file. The subject is now
+stated once, in `MISSION.md`, and the store is `~/.socrates/courses/<slug>/`.
+
 **Context:** The handoff's catalogue is subject-based (Algebra, Biology), but the only real learning
 missions on this machine are anchored to a codebase — `DriftScout`'s mission is "build an admin post
 authorization system into DriftScout". The user explicitly wants to ask about a codebase rather than a
@@ -88,8 +92,11 @@ Derivation rules (documented in `docs/CONTENT-MODEL.md`):
 | Module | derived study actions per lesson | `recite` (grill), `review` (SM-2 due), `explain` (Feynman), `misconceptions` (count) |
 | Course context | MISSION + PLAN | rendered as "About this course" and the mission anchor — never as units |
 
-`COURSE.md` may declare explicit lesson groups, module order, module types, assessment placement, and
-`kind: codebase`. Absent a manifest, the derivation above is authoritative.
+`COURSE.md` may declare explicit lesson groups, module order, module types, and assessment placement.
+Absent a manifest, the derivation above is authoritative.
+
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. The `kind` row and the manifest's `kind: codebase` are gone with the codebase kind; the
+manifest override itself still stands, and a course's units are still its concept cards.
 
 **Alternatives considered:** Manifest-only (explicit but every existing directory needs a new file, and
 existing projects break) — rejected. Derive units from PLAN phases (spike-disproved) — rejected.
@@ -102,6 +109,10 @@ derivation must stay small and documented so it cannot drift into heuristics.
 regression fixture. It is a rendering fixture, not a course to continue (its session backfill was scrapped).
 
 ## 2026-09-13 — Add-a-course: scan-first, registry overlay, API/UI path
+
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. All three mechanisms are deleted outright — the scan, the registry overlay and the
+register/unregister API. Adding a course is `POST /api/courses { subject }`, which creates
+`~/.socrates/courses/<slug>/` and seeds `MISSION.md` for the tutor's interview.
 
 **Context:** Today one `PROJECT_DIR` env var binds exactly one course. The handoff has a course switcher and
 a catalogue but no way to add a course. Spike B proved `parseLearning(dir)` is already directory-agnostic and
@@ -125,8 +136,13 @@ flag are the escape hatches. Windows path handling must go through the existing 
 
 ## 2026-09-13 — Multi-course bridge: one pi process, restarted on course switch
 
-**Context:** The bridge spawns `pi --mode rpc` with `cwd = PROJECT_DIR`. That cwd *is* which course the tutor
-can read and write. Multiple courses therefore force a decision, and pi is memory-heavy (~1GB observed).
+**Context:** The bridge spawns `pi --mode rpc` with `cwd` set to the course directory. That cwd *is* which
+course the tutor can read and write. Multiple courses therefore force a decision, and pi is memory-heavy
+(~1GB observed).
+
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. The cwd no longer comes from `PROJECT_DIR` (deleted) — it is the directory of the course
+being taught, under `~/.socrates/courses/`. The decision below — one process, killed and warm-spawned on
+a course switch — is unchanged and still in force.
 
 **Decision:** Keep **one** pi process. On course switch: kill the whole process tree (`taskkill /T` on Windows,
 as `kill()` already does), then warm-spawn for the new course so the first prompt is not cold.
@@ -185,9 +201,12 @@ therefore have no content source. Generating them blindly would produce unverifi
 
 **Decision:** Authored wins when present: if `COURSE.md` declares quiz / unit-test items, use them. Otherwise
 generate on demand via pi under a structured-output contract (question, choices-or-answer, hints,
-step-by-step solution), **validate before serving**, then cache the validated item. For `kind: codebase`
-courses, generated items must cite real repo artifacts. Derivation/generation is the default so authorless
-courses work.
+step-by-step solution), **validate before serving**, then cache the validated item. Derivation/generation is
+the default so authorless courses work.
+
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. The `kind: codebase` clause is gone: with no codebase course there is nothing for a generated
+item to cite, so validation is structural only. Authored-wins, validate-before-serving and the cache all
+still stand.
 
 **Alternatives considered:** Generated-only (unverifiable content, no citation possible) — rejected.
 Authored-only (every course needs a hand-written item bank before it can show a quiz) — rejected.
@@ -293,6 +312,9 @@ command that gates everything. Mitigated by the documented test command above an
 tests self-contained. Also means P0 lands as a `pi-agent-harness` commit, reviewed on its own terms.
 
 ## 2026-09-13 — Course paths are chosen with a server-side folder browser, on a loopback bind
+
+**Superseded** 2026-09-13 by P16 — a course is a subject, not a folder. There is no folder to choose: a course is created in the store from a subject, so `GET /api/fs`,
+`fs-browse.ts` and `FolderPicker.tsx` are deleted. Nothing in the app browses the filesystem.
 
 **Context:** Adding a course required typing an absolute path by hand. Browsers cannot hand a local
 server a real directory path: the File System Access API withholds the absolute path by design, and

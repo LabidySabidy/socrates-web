@@ -3,11 +3,11 @@
  *
  * Multi-course resource routes plus the original single-course chat bridge:
  *
- *   GET  /api/courses                discovered + registered courses (scan + registry overlay)
+ *   GET  /api/courses                every course in the store
  *   GET  /api/courses/:id            derived/manifest course tree (units → modules)
  *   GET  /api/courses/:id/learning   raw LearningData for that course
- *   POST /api/courses                register / unregister / hide / unhide
- *   GET  /api/learning               ALIAS for the default course — unchanged shape
+ *   POST /api/courses                start a course from a subject (creates the store dir)
+ *   GET  /api/learning               REMOVED — 404 pointing at /api/courses/:id/learning
  *   POST /api/chat                   prompt the singleton pi agent
  *   GET  /api/stream                 SSE: agent output + {type:"reload"} on schema change
  *   GET  /health

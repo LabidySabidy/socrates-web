@@ -3,6 +3,13 @@
 > Review artifact. Three parts: what to take from the handoff, what the real backend
 > is missing, and the spike evidence for the two riskiest unknowns.
 > Visual targets: `docs/handoff-shots/` (home, course, lesson, quiz, lab, cockpit).
+>
+> **Historical (2026-09-13).** This analysis and its spikes are the record of what was true when the
+> platform was being designed. Its discovery conclusions — `PROJECT_DIR`, `COURSES_ROOT`, the scan,
+> the registry overlay, the folder browser — were **superseded by P16, "a course is a subject, not a
+> folder"** (`DECISIONS.md`). Spike B's finding that `parseLearning(dir)` is directory-agnostic still
+> holds and is why a course can live in the store; the enumeration machinery built on it is gone.
+> Read `docs/CONTENT-MODEL.md` and `DECISIONS.md` for the current model.
 
 ---
 
