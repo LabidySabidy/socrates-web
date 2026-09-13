@@ -959,3 +959,66 @@ test("a rename during a turn is deferred, and lands once the agent settles", asy
   // remove a directory a live process is standing in. The suite's own teardown runs after every
   // server has been closed, which is when the child is actually gone.
 });
+
+test("the tutor writing a title renames the course without anyone asking", async (t) => {
+  // The skill's Step 7 writes the H1 at the end of the interview. Nobody clicks anything, so the only
+  // thing that can notice is the watch: MISSION.md changes -> reconcile -> the directory follows, and
+  // the page is told on the same channel it already holds.
+  const { base } = await bootChatWith(t, "mock-pi-cwd.mjs");
+  // Created through the API, because that is what registers a watcher — the app never writes a course
+  // directory behind the server's back, and neither should the test.
+  const made = await fetch(`${base}/api/courses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject: "tutor named" }),
+  });
+  const created = (await made.json()) as { id: string; dir: string };
+  assert.equal(made.status, 201);
+  const dir = created.dir;
+
+  // Let the create's own watch event be processed first. The tutor writes its title well after the
+  // course exists; firing both writes inside one event batch is a race the filesystem is free to
+  // coalesce, and it tests the watcher's luck rather than its logic.
+  await new Promise((r) => setTimeout(r, 500));
+
+  const controller = new AbortController();
+  const stream = await fetch(`${base}/api/watch`, { signal: controller.signal });
+  const reader = stream.body!.getReader();
+  const decoder = new TextDecoder();
+  const frames: string[] = [];
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        decoder.decode(value).split("\n\n").forEach((f) => f.trim() && frames.push(f));
+      }
+    } catch {
+      /* aborted at the end */
+    }
+  })();
+
+  // exactly what the skill does: rewrite the first line, leave the rest alone
+  const file = join(dir, ".agent", "learning", "MISSION.md");
+  const before = readFileSync(file, "utf8");
+  writeFileSync(file, ["# Driveway Toe Alignment", ...before.split("\n").slice(1)].join("\n"));
+
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline && !existsSync(join(STORE, "driveway-toe-alignment"))) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  controller.abort();
+  await pump;
+
+  assert.ok(existsSync(join(STORE, "driveway-toe-alignment")), "the filesystem followed the document");
+  assert.ok(!existsSync(dir), "the old directory is gone");  assert.ok(
+    frames.some((f) => f.includes('"from":"tutor-named"') && f.includes('"to":"driveway-toe-alignment"')),
+    `expected a renamed frame; saw ${JSON.stringify(frames)}`,
+  );
+  assert.equal(
+    readFileSync(join(STORE, "driveway-toe-alignment", ".agent", "learning", "MISSION.md"), "utf8").split("\n")[0],
+    "# Driveway Toe Alignment",
+  );
+  rmSync(join(STORE, "driveway-toe-alignment"), { recursive: true, force: true });
+});

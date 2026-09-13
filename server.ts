@@ -384,17 +384,35 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     if (wanted && wanted !== id && existsSync(courseDir(wanted, storeEnv))) {
       return { ok: false, id, error: `a course called "${wanted}" already exists — pick a different title` };
     }
+    if (!wanted || wanted === id) return { ok: true, id, renamed: false };
+
+    // Our own `fs.watch` holds a handle inside the directory, and Windows refuses to rename a directory
+    // with an open handle on it (`EPERM`) — so the watcher has to let go before the move and be rebuilt
+    // after it. Only visible with watching on, which is how the app actually runs.
+    const wasWatching = watchEnabled;
+    if (wasWatching) closeWatchers();
 
     let result;
-    if (active && wanted && wanted !== id) {
+    if (active) {
       const toDir = courseDir(wanted, storeEnv);
       bridge.moveCourseDir(ref.dir, toDir);
-      result = { ok: true as const, renamed: true as const, id: wanted, dir: toDir, from: id, to: wanted, fromDir: ref.dir };
+      result = {
+        ok: true as const,
+        renamed: true as const,
+        id: wanted,
+        dir: toDir,
+        from: id,
+        to: wanted,
+        fromDir: ref.dir,
+      };
       bridge.switchCourse(toDir);
       if (turnCourse === id) turnCourse = wanted;
     } else {
       result = reconcileCourse(id, storeEnv);
     }
+
+    if (wasWatching) resyncWatchers();
+
     if (!result.ok) return { ok: false, id, error: result.error };
     if (result.renamed) {
       console.log(`[rename] ${result.from} -> ${result.to}`);
@@ -441,7 +459,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       try {
         watchers.push(
           watch(dir, (_event, filename) => {
-            if (filename && filename !== "SCHEMA.md" && filename !== "COURSE.md") return;
+            // MISSION.md is watched because it carries the NAME: the tutor writes its title there, and the
+            // filesystem has to follow. The reconcile below is deferred while a turn is running (the
+            // agent's cwd is the course directory) and lands on settle, which is the same path a UI
+            // rename takes.
+            const watched = filename === "SCHEMA.md" || filename === "COURSE.md" || filename === "MISSION.md";
+            if (filename && !watched) return;
             const existing = watchTimers.get(ref.id);
             if (existing) clearTimeout(existing);
             watchTimers.set(
@@ -449,7 +472,10 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
               setTimeout(() => {
                 watchTimers.delete(ref.id);
                 console.log(`[watcher] ${ref.id}: ${filename ?? "change"} — re-parsing (150ms debounce)`);
-                pushReload(ref.id);
+                // A name change moves the directory first, so the reload below reads the new id.
+                reconcile(ref.id);
+                const current = findCourse(discover(), ref.id);
+                if (current) pushReload(current.id);
               }, 150),
             );
           }),
