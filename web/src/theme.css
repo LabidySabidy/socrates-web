@@ -591,3 +591,8 @@ a.mod:hover { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .launch-bar .marker { transition: none; }
 }
+
+.manage-init { flex-wrap: wrap; }
+.start-form { flex-basis: 100%; margin-top: 12px; padding: 14px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-sunk); }
+.start-form .manage-hint { flex-basis: 100%; margin: 0; }
+.quiz-pending { color: var(--action); }

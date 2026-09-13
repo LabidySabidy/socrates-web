@@ -19,6 +19,7 @@ import {
   registryPathFor,
   saveRegistry,
   setHidden,
+  startCourse,
   uninitiatedCourses,
   unregisterCourse,
   visibleCourses,
@@ -262,6 +263,48 @@ test("a hidden initiated course leaves the catalogue but stays uninitiated-free"
   assert.equal(findCourse(result, "Alpha")?.initiated, true);
   assert.deepEqual(catalogueCourses(result), [], "hidden is excluded from the catalogue");
   assert.deepEqual(uninitiatedCourses(result), [], "but it is not uninitiated");
+});
+
+test("startCourse authors a mission, and refuses to overwrite or accept an empty one", (t) => {
+  const root = tmp(t);
+  const bare = join(root, "Bare", ".agent", "learning");
+  mkdirSync(bare, { recursive: true });
+  writeFileSync(join(bare, "SCHEMA.md"), "# SCHEMA");
+
+  assert.equal(isCourseDir(join(root, "Bare")), true, "the learning dir exists");
+  assert.equal(findCourse(discoverCourses({ root, registryPath: join(root, "courses.json") }), "Bare")?.initiated, false);
+
+  assert.match(startCourse(join(root, "Bare"), { destination: "   " }).error!, /destination required/);
+  assert.equal(startCourse(join(root, "not-a-dir"), { destination: "x" }).ok, false, "no learning dir");
+
+  const started = startCourse(join(root, "Bare"), {
+    destination: "build an approval flow",
+    artifact: "a merged PR",
+  });
+  assert.deepEqual(started, { ok: true });
+
+  // It is now a course: initiated, in the catalogue, with a real title.
+  const after = discoverCourses({ root, registryPath: join(root, "courses.json") });
+  const ref = findCourse(after, "Bare")!;
+  assert.equal(ref.initiated, true);
+  assert.deepEqual(catalogueCourses(after).map((c) => c.id), ["Bare"]);
+  assert.equal(ref.title, "build an approval flow", "the derivation reads the written field");
+
+  // And it is not restartable.
+  const again = startCourse(join(root, "Bare"), { destination: "something else" });
+  assert.equal(again.ok, false);
+  assert.match(again.error!, /already initiated/);
+  assert.match(readFileSync(join(bare, "MISSION.md"), "utf8"), /build an approval flow/);
+});
+
+test("a course started without an artifact says so instead of inventing one", (t) => {
+  const root = tmp(t);
+  const bare = join(root, "Bare", ".agent", "learning");
+  mkdirSync(bare, { recursive: true });
+  startCourse(join(root, "Bare"), { destination: "learn something" });
+  const body = readFileSync(join(bare, "MISSION.md"), "utf8");
+  assert.match(body, /- \*\*I will be able to:\*\* learn something/);
+  assert.match(body, /<fill in later>/, "an unanswered field is marked, not fabricated");
 });
 
 test("a manifest declaring codebase kind is reported as such", (t) => {

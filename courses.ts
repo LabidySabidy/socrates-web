@@ -305,6 +305,50 @@ export function discoverCourses(opts: {
   return { courses, root: root ?? null, warnings };
 }
 
+/**
+ * Author `MISSION.md` — the marker that makes a directory a course.
+ *
+ * This is the UI path over behaviour that already exists: the scaffold skill writes the same file
+ * from the same template shape. Only the destination is required, because that is the field the
+ * derivation reads for the course title; the rest can be enriched later by the scaffold skill.
+ *
+ * Never overwrites an existing mission — a course that has been started is not restartable.
+ */
+export function startCourse(
+  dir: string,
+  mission: { destination: string; artifact?: string; drivingProject?: string },
+): { ok: boolean; error?: string } {
+  const abs = resolve(dir);
+  if (!isCourseDir(abs)) return { ok: false, error: `not a learning directory: ${dir}` };
+  if (existsSync(join(learningDir(abs), "MISSION.md"))) {
+    return { ok: false, error: "already initiated: MISSION.md exists" };
+  }
+  const destination = mission.destination.trim();
+  if (!destination) return { ok: false, error: "destination required" };
+
+  const body = [
+    `# Mission — ${basename(abs)}`,
+    "",
+    "> Grounds every lesson in a real, personal reason. Written by the app from your own words; the",
+    "> scaffold skill can enrich the rest of the heading, baseline and commitment sections.",
+    "",
+    "## Destination",
+    "",
+    `- **I will be able to:** ${destination}`,
+    `- **Proof-of-skill artifact:** ${mission.artifact?.trim() || "<fill in later>"}`,
+    `- **Driving project / pain:** ${mission.drivingProject?.trim() || "<fill in later>"}`,
+    "",
+  ].join(String.fromCharCode(10));
+
+  try {
+    mkdirSync(learningDir(abs), { recursive: true });
+    writeFileSync(join(learningDir(abs), "MISSION.md"), body, "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Courses a catalogue should show: initiated and not hidden. */
 export function catalogueCourses(result: DiscoveryResult): CourseRef[] {
   return result.courses.filter((c) => c.initiated && !c.hidden);

@@ -143,3 +143,25 @@ export async function generateInteractives(id: string, unit: number): Promise<In
   }
   return body;
 }
+
+export interface StartResult {
+  ok?: boolean;
+  error?: string;
+  courses?: CourseRef[];
+  started?: CourseRef | null;
+}
+
+/** Author MISSION.md from the user's own words — the marker that makes a directory a course. */
+export async function startCourse(
+  id: string,
+  mission: { destination: string; artifact?: string; drivingProject?: string },
+): Promise<StartResult> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/init`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(mission),
+  });
+  const body = (await res.json().catch(() => ({}))) as StartResult;
+  if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+  return body;
+}

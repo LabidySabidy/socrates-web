@@ -8,7 +8,7 @@
  * the server answers with `stillDiscovered` and we say so instead of appearing to do nothing.
  */
 import { useState } from "react";
-import { postCourse } from "../api.ts";
+import { postCourse, startCourse } from "../api.ts";
 import type { CourseRef } from "../types.ts";
 import { uninitiatedCourses } from "../select.ts";
 
@@ -31,6 +31,10 @@ export function ManageCourses({
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ManageResult | null>(null);
+  /** Which not-initiated course is being started, and the mission being written for it. */
+  const [starting, setStarting] = useState<string | null>(null);
+  const [destination, setDestination] = useState("");
+  const [artifact, setArtifact] = useState("");
 
   const uninitiated = uninitiatedCourses(courses);
 
@@ -49,6 +53,31 @@ export function ManageCourses({
       });
       setDir("");
       setLabel("");
+      onChanged();
+    } catch (err) {
+      setResult({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function initiate(id: string) {
+    if (!destination.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await startCourse(id, {
+        destination: destination.trim(),
+        artifact: artifact.trim() || undefined,
+      });
+      if (!res.ok) {
+        setResult({ kind: "error", message: res.error ?? "could not start the course" });
+        return;
+      }
+      setResult({ kind: "ok", message: `Started. ${id} now has a mission and appears in the catalogue.` });
+      setStarting(null);
+      setDestination("");
+      setArtifact("");
       onChanged();
     } catch (err) {
       setResult({ kind: "error", message: err instanceof Error ? err.message : String(err) });
@@ -143,13 +172,62 @@ export function ManageCourses({
               <p className="manage-hint">
                 These directories have a learning folder but no mission, so they are not courses and
                 do not appear in the catalogue or its count. A mission is what marks a course as
-                started.
+                started — write one here and the course appears immediately.
               </p>
               <ul className="manage-list">
                 {uninitiated.map((c) => (
-                  <li key={c.id}>
+                  <li key={c.id} className="manage-init">
                     <span className="manage-name">{c.id}</span>
                     <span className="manage-src eyebrow">not initiated (no MISSION.md)</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-expanded={starting === c.id}
+                      onClick={() => {
+                        setStarting(starting === c.id ? null : c.id);
+                        setDestination("");
+                        setArtifact("");
+                      }}
+                    >
+                      {starting === c.id ? "Cancel" : "Start course"}
+                    </button>
+
+                    {starting === c.id ? (
+                      <form
+                        className="add-form start-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void initiate(c.id);
+                        }}
+                      >
+                        <label>
+                          <span className="eyebrow">I will be able to… (required)</span>
+                          <input
+                            value={destination}
+                            onChange={(e) => setDestination(e.target.value)}
+                            placeholder="build an admin approval flow enforced at the database layer"
+                            aria-label="Mission destination"
+                            autoFocus
+                          />
+                        </label>
+                        <label>
+                          <span className="eyebrow">Proof-of-skill artifact (optional)</span>
+                          <input
+                            value={artifact}
+                            onChange={(e) => setArtifact(e.target.value)}
+                            placeholder="a merged PR adding RLS + an RPC"
+                            aria-label="Proof-of-skill artifact"
+                          />
+                        </label>
+                        <button type="submit" className="primary" disabled={busy || !destination.trim()}>
+                          Write the mission
+                        </button>
+                        <p className="manage-hint">
+                          Writes <code>MISSION.md</code> in your own words. The scaffold skill can
+                          enrich the rest of the mission later.
+                        </p>
+                      </form>
+                    ) : null}
                   </li>
                 ))}
               </ul>

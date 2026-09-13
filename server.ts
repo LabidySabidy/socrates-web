@@ -30,6 +30,7 @@ import {
   defaultCoursesRoot,
   registerCourse,
   setHidden,
+  startCourse,
   unregisterCourse,
   REGISTRY_VERSION,
   type CourseRef,
@@ -756,6 +757,39 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         }
         return;
       }
+    }
+
+    // --- start a course: author the mission, the marker of intent -------------
+    const initMatch = /^\/api\/courses\/([^/]+)\/init$/.exec(url);
+    if (initMatch && req.method === "POST") {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(initMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${initMatch[1]}` });
+        return;
+      }
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+        const started = startCourse(ref.dir, {
+          destination: typeof body.destination === "string" ? body.destination : "",
+          artifact: typeof body.artifact === "string" ? body.artifact : undefined,
+          drivingProject: typeof body.drivingProject === "string" ? body.drivingProject : undefined,
+        });
+        if (!started.ok) {
+          sendJson(res, started.error?.startsWith("already") ? 409 : 400, { error: started.error });
+          return;
+        }
+        resyncWatchers();
+        const after = discover();
+        sendJson(res, 200, {
+          ok: true,
+          courses: after.courses,
+          started: after.courses.find((c) => c.id === ref.id) ?? null,
+        });
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
     }
 
     // --- quiz results: recorded as history, never as a mastery claim -----------

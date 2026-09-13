@@ -290,10 +290,16 @@
       **SM-2 deliberately untouched:** an interval is a function of the previous interval and ease factor, and no
       such rule for a quiz attempt is defined anywhere in this project — inventing one would be a fabricated
       scheduling rule. The tutor's telemetry owns those fields.
-- [ ] **T-041** A "start a course" affordance. A not-initiated directory can only be fixed by authoring
-      `MISSION.md` by hand — there is no UI path and no scaffold flow in the app. Acceptable while the
-      catalogue is small; revisit as it grows. The scaffold skill already knows how to write the three files,
-      so this is a UI affordance over existing behaviour, not new content logic.
+- [x] **T-041** A "start a course" affordance.
+      **Done** — each not-initiated entry in "Add or manage" now offers **Start course**, which opens a small
+      form and writes `MISSION.md` from the user's OWN words (destination required; artifact optional). The
+      scaffold skill can enrich the rest of the mission later. It never overwrites an existing mission, an
+      unanswered field is written as `<fill in later>` rather than fabricated, and the course appears in the
+      catalogue immediately.
+      **Browser-verified:** catalogue went from 1 course to 2, the new card is titled from the typed
+      destination, the submit button stays disabled until the destination is non-empty, and the file on disk
+      carries the typed words with `<fill in later>` for the blank field. 2 unit tests cover the refusals
+      (empty destination, no learning dir, already initiated).
 - [ ] **T-034** Derived persistence signal — review cycles survived — rendered as a small tick, never a
       colour. Behaviourally grounded, so honest to derive. **Not to be started without an explicit ask.**
 - [x] **T-037** Client test for the tray + mastery colour mapping, so drift is caught without a browser.
