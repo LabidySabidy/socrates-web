@@ -69,23 +69,42 @@
       updates the first row and leaves the rest, because it never deletes. Needs a duplicate-id warning.
 
 ## P1 — Content model + API surface
-- [ ] **T-010** `course-model.ts` — derivation (unit = concept card) returning `{ tree, warnings[] }` with all
+- [x] **T-010** `course-model.ts` — derivation (unit = concept card) returning `{ tree, warnings[] }` with all
       seven edge cases from the grill doc. **Done when:** tests cover 0 concepts, missing SCHEMA.md, missing
       MISSION.md, duplicate concept names, unknown badge, and a `COURSE.md` naming a nonexistent card.
-- [ ] **T-011** `COURSE.md` override parser (lesson groups, module order/types, assessment placement, `kind`).
+      **Done** — `course-model.ts` + 17 tests; all seven edges covered, plus a nonexistent course directory.
+- [x] **T-011** `COURSE.md` override parser (lesson groups, module order/types, assessment placement, `kind`).
       **Done when:** a manifest overrides the derived tree and `manifest > derived` precedence is tested.
-- [ ] **T-012** 5-state mastery map (badge → state / colour / ring) as a single exported union; no sixth state.
+      **Done** — `parseCourseManifest()`; a malformed manifest falls back to the derivation with
+      `manifest-invalid:<reason>` instead of producing a half-built tree. `@concept` refs attach mastery;
+      a dangling ref is preserved with `missing: true` + `unknown-lesson:<name>`.
+- [x] **T-012** 5-state mastery map (badge → state / colour / ring) as a single exported union; no sixth state.
       **Done when:** a test asserts every badge maps, and an unknown badge renders `Not started` + warning.
-- [ ] **T-013** `courses.ts` — `COURSES_ROOT` scan (one level), `.agent/courses.json` overlay
+      **Done** — `MASTERY_BY_BADGE` / `masteryOf` / `aggregateMastery` / `countByMastery`; exactly five states
+      asserted, unknown badge reads Not started, aggregate never divides by zero.
+- [x] **T-013** `courses.ts` — `COURSES_ROOT` scan (one level), `.agent/courses.json` overlay
       (pin / order / label / hide / add), ignore list. **Done when:** tests cover scan discovery, hide, pin order,
       and a registry entry outside the scan root.
-- [ ] **T-014** Routes: `GET /api/courses`, `GET /api/courses/:id`, `GET /api/courses/:id/learning`,
+      **Done** — 14 tests, each against its own throwaway root. Missing root, corrupt registry, unreadable
+      entry, and duplicate basenames all degrade to warnings. Catalogue concept counts unique-counted so they
+      agree with the derived unit count.
+- [x] **T-014** Routes: `GET /api/courses`, `GET /api/courses/:id`, `GET /api/courses/:id/learning`,
       `POST /api/courses`; `/api/learning` unchanged as an alias. **Done when:** an alias-shape test proves the
       old response is byte-compatible.
-- [ ] **T-015** Watcher covers N courses. **Done when:** editing SCHEMA.md in a non-default course pushes a
+      **Done** — `startServer()` exported (importing `server.ts` no longer has side effects); 12 integration
+      tests boot the real router on an ephemeral port. The alias test asserts
+      `text === JSON.stringify(parseLearning(dir), null, 2)`.
+- [x] **T-015** Watcher covers N courses. **Done when:** editing SCHEMA.md in a non-default course pushes a
       `reload` event for that course only.
-- [ ] **T-016** `docs/CONTENT-MODEL.md` — the derivation rules and the warnings table. **Done when:** it matches
+      **Done** — one debounced watcher per discovered course; `reload` carries `course` plus the rebuilt tree.
+      Watchers resync on register/hide/unregister. Observed live: `[watcher] watching 7 course(s)`.
+- [x] **T-016** `docs/CONTENT-MODEL.md` — the derivation rules and the warnings table. **Done when:** it matches
       `course-model.ts` exactly (checked by reading both).
+      **Done** — derivation table, five-state mastery table, full warnings table, manifest grammar, module
+      taxonomy, discovery rules, and the spike evidence for why phases are never units.
+- [x] **T-033a** Vendor a course fixture set under `test/fixtures/` so no test depends on an external project.
+      **Done** — 7 fixture courses (basic, empty-concepts, no-schema, no-mission, duplicate-concepts,
+      unknown-badge, manifest); `.gitignore` `.agent/` anchored to `/.agent/` so fixtures stay committable.
 - [x] **T-032** Misconception severity end-to-end — shared format across the extension and this repo.
       `severity: root|partial|edge` on the 7th registry column + optional `record_learning` field; blank means
       unrated; `resolved`/`unrated` derived, never stored; never inferred from prose; updatable on

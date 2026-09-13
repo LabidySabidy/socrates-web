@@ -1,5 +1,6 @@
-# Study data (runtime learning files — read-only, never committed)
-.agent/
+# Runtime study data at the repo root only — anchored so vendored fixtures under
+# test/fixtures/**/.agent/learning stay committable.
+/.agent/
 
 # Secrets / environment
 .env

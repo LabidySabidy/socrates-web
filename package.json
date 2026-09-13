@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.ts",
-    "test": "node --test learning-parser.test.ts bridge.test.ts"
+    "test": "node --test learning-parser.test.ts bridge.test.ts course-model.test.ts courses.test.ts server.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1"
