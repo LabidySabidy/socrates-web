@@ -41,6 +41,7 @@ import {
 } from "./quiz.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
 import { grillHref, grillPrompt, isGrillPrompt, parseAsk } from "./grill.ts";
+import { appendUser, isTranscriptEmpty, settleAssistant, type ChatTurn } from "./transcript.ts";
 import {
   isPassiveText,
   isPassivitySignal,
@@ -1090,4 +1091,45 @@ test("the trigger is the tutor's signal, not client-side detection", () => {
   assert.equal(isPassivitySignal({ type: "message_update", method: "notify", message: "PASSIVITY" }), false);
   assert.equal(isPassivitySignal({ type: "extension_ui_request", method: "select", message: "PASSIVITY" }), false);
   assert.equal(isPassivitySignal(null), false);
+});
+
+// ---------------------------------------------------------------------------
+// T-050 — the learner's own turns
+// ---------------------------------------------------------------------------
+
+test("a learner message is appended the moment it is sent", () => {
+  const one = appendUser([], "Explain batching in one sentence.");
+  assert.deepEqual(one, [{ role: "user", text: "Explain batching in one sentence." }]);
+  assert.equal(one[0].role, "user");
+  const two = appendUser(one, "  and what about two setState calls?  ");
+  assert.equal(two.length, 2);
+  assert.equal(two[1].text, "and what about two setState calls?", "trimmed");
+  assert.equal(appendUser(one, "   ").length, 1, "an empty send adds nothing");
+});
+
+test("a settled tutor turn joins the transcript, and an empty one does not", () => {
+  const after = settleAssistant([], "Same word, three mechanisms.");
+  assert.deepEqual(after, [{ role: "assistant", text: "Same word, three mechanisms." }]);
+  assert.deepEqual(settleAssistant([], "   "), [], "a turn with nothing visible adds nothing");
+  assert.deepEqual(settleAssistant([], ""), []);
+});
+
+test("a gate-truncated reply settles as what the learner actually saw", () => {
+  // The gate copy is a control signal, so it must not land in the transcript as prose.
+  const settled = settleAssistant([], "Here is your question.\n\nSPRINT_GATE\n\nTake a break.");
+  assert.deepEqual(settled, [{ role: "assistant", text: "Here is your question." }]);
+});
+
+test("the transcript interleaves in order and only reports empty when it is", () => {
+  let h: ChatTurn[] = [];
+  assert.equal(isTranscriptEmpty(h), true);
+  h = appendUser(h, "q1");
+  h = settleAssistant(h, "a1");
+  h = appendUser(h, "q2");
+  h = settleAssistant(h, "a2");
+  assert.deepEqual(
+    h.map((t) => `${t.role}:${t.text}`),
+    ["user:q1", "assistant:a1", "user:q2", "assistant:a2"],
+  );
+  assert.equal(isTranscriptEmpty(h), false);
 });

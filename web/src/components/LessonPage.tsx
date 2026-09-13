@@ -14,6 +14,7 @@ import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefLesson } from "../router.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, type TurnState } from "../turn.ts";
+import { appendUser, settleAssistant, type ChatTurn } from "../transcript.ts";
 import {
   isPassiveText,
   isPassivitySignal,
@@ -63,6 +64,13 @@ export function LessonPage({
   const gateSeen = useRef(false);
   /** The tutor's passivity intercept. Active until a real explanation is sent. */
   const [intercept, setIntercept] = useState(false);
+  /**
+   * Settled turns. The original rendered the learner's message the moment it was sent
+   * (`append("user", message)`, 06cee66^:public/app.js:181) and kept it in the transcript; without
+   * this the console showed only the tutor, so a sent explanation left no visible trace.
+   */
+  const [history, setHistory] = useState<ChatTurn[]>([]);
+
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -152,6 +160,8 @@ export function LessonPage({
     setBusy(true);
     setError(null);
     setTurn(emptyTurn());
+    // Appended BEFORE the reply, exactly as the original did.
+    setHistory((h) => appendUser(h, message));
 
     let res: Response;
     try {
@@ -180,11 +190,19 @@ export function LessonPage({
     const es = new EventSource(`/api/stream?course=${encodeURIComponent(courseId)}`);
     streamRef.current = es;
 
+    // Accumulated SYNCHRONOUSLY in the handler, not read back from React state. A ref mirrored by an
+    // effect can still be stale when the settle frame arrives in the same burst as the last delta,
+    // which settled an empty turn and made the tutor's reply vanish.
+    let proseSoFar = "";
+
     es.onmessage = (ev) => {
       const raw: string = ev.data;
       if (raw === "[DONE]") {
         es.close();
         if (streamRef.current === es) streamRef.current = null;
+        // Settle the turn into the transcript so the next one starts clean.
+        setHistory((h) => settleAssistant(h, proseSoFar));
+        setTurn(emptyTurn());
         setBusy(false);
         return;
       }
@@ -207,6 +225,10 @@ export function LessonPage({
         return;
       }
       if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
+        const delta = parsed.assistantMessageEvent as { type?: string; delta?: unknown };
+        if (delta.type === "text_delta" && typeof delta.delta === "string") {
+          proseSoFar += delta.delta;
+        }
         setTurn((prev) => reduceTurn(prev, parsed!.assistantMessageEvent));
       }
     };
@@ -255,11 +277,23 @@ export function LessonPage({
             <div className="reasoning-body">{thinking || "No reasoning recorded for this turn."}</div>
           </details>
 
+          {history.map((m, i) =>
+            m.role === "user" ? (
+              <div className="msg-user" key={i}>
+                {m.text}
+              </div>
+            ) : (
+              <div className="prose reading" key={i}>
+                {m.text}
+              </div>
+            ),
+          )}
+
           {prose ? (
             <div className="prose reading">{prose}</div>
           ) : busy ? (
             <p className="presence">Socrates is thinking…</p>
-          ) : (
+          ) : history.length === 0 ? (
             <div className="prose reading lesson-intro">
               <p>
                 This activity is a live session with the tutor. Ask a question, or explain the
@@ -267,7 +301,7 @@ export function LessonPage({
                 above, and its reply here.
               </p>
             </div>
-          )}
+          ) : null}
 
           {isSilent(turn) && !busy && prose === "" ? null : null}
         </div>

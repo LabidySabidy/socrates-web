@@ -334,7 +334,7 @@
 > Source is `06cee66^:public/app.js`, not the audit.
 
 - [x] **T-046** Grill-misconception dispatch (REDESIGN). **Done when:** clicking a misconception row or a
-      concept name navigates to the lesson with the exact `/skill/grill-misconception <concept>` prompt
+      concept name navigates to the lesson with the exact `/skill:grill-misconception <concept>` prompt
       seeded, dispatches it against the real bridge, and a reload does not re-send.
       **Done** — `web/src/grill.ts` (prompt, href, ask parsing) + a Grill action on every tray row and every
       SM-2 concept name. The href resolves the concept to ITS unit (react-state → 1, hooks → 2), which the
@@ -370,11 +370,19 @@
       the frame is generated deterministically): banner appears on the tutor's signal → "ok" leaves the button
       disabled reading "Explain it" → a real explanation enables "Send" → sending clears the intercept and the
       next turn streams.
-- [ ] **T-050** The lesson console never renders the learner's own message. The original did —
-      `append("user", message)` at `06cee66^:public/app.js:183` — and the handoff specifies learner turns as
+- [x] **T-050** The lesson console never renders the learner's own message. The original did —
+      `append("user", message)` at `06cee66^:public/app.js:181` — and the handoff specifies learner turns as
       high-contrast and right-aligned. Found while verifying T-048 (a sent explanation left no visible trace).
-      **Done when:** the console shows each learner turn, and a sent message is visible without scrolling away
-      from the tutor's reply.
+      **Done** — `web/src/transcript.ts` (pure `appendUser` / `settleAssistant`, gate-aware) plus the console
+      rendering settled turns before the live one. Learner turns use the handoff's treatment: ink background,
+      paper text, 8px radius, max 80% width, right-aligned.
+      **Browser-verified on the real bridge:** the learner's message appeared immediately, before any reply;
+      the tutor's reply settled into the transcript rather than vanishing; and two exchanges accumulated in
+      order (2 learner + 2 tutor).
+      **Bug found while verifying:** the first attempt settled the turn by reading React state through a ref
+      mirrored by an effect — stale when the settle frame arrived with the last delta, so it settled an EMPTY
+      turn and the tutor's reply vanished entirely. Prose is now accumulated synchronously in the stream
+      handler.
 - [x] **T-049** Budapest mode as a structured `mode` on `POST /api/chat` (REDESIGN). **Done when:** with the
       toggle on, the modifier reaches the server's outgoing prompt while the posted message does not.
       **Done** — `BUDAPEST_MODIFIER` ported verbatim into `server.ts`; the client sends `mode` and the SERVER
