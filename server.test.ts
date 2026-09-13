@@ -17,17 +17,22 @@ const FIXTURES = join(import.meta.dirname, "test", "fixtures");
 const BASIC = join(FIXTURES, "course-basic");
 
 async function boot(t: { after(fn: () => Promise<void> | void): void }): Promise<{ base: string; running: RunningServer }> {
+  // A throwaway static root keeps the tests independent of `web/dist` existing.
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
     projectDir: BASIC,
     coursesRoot: FIXTURES,
     registryPath: join(BASIC, ".agent", "courses.json"),
+    staticDir,
     chat: false,
     watch: false,
   });
   t.after(async () => {
     await running.close();
     rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
+    rmSync(staticDir, { recursive: true, force: true });
   });
   return { base: `http://127.0.0.1:${running.port}`, running };
 }
@@ -57,17 +62,21 @@ test("booting the server does not spawn pi and never writes into the course", as
   // containing absolute paths straight into the course directory. Booting is now inert:
   // the bridge is wired on the first chat request only.
   const before = walk(BASIC);
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
     projectDir: BASIC,
     coursesRoot: FIXTURES,
     registryPath: join(BASIC, ".agent", "courses.json"),
+    staticDir,
     chat: true, // chat available — just not started
     watch: false,
   });
   t.after(async () => {
     await running.close();
     rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
+    rmSync(staticDir, { recursive: true, force: true });
   });
 
   await new Promise((r) => setTimeout(r, 500)); // give an unwanted spawn time to write
@@ -154,15 +163,20 @@ test("GET /api/courses/:id/learning returns the raw LearningData", async (t) => 
   assert.equal(body.schema.misconceptions[0].severity, "root");
 });
 
-test("GET /api/learning is unchanged: the default course, byte-compatible", async (t) => {
+test("the legacy /api/learning alias is gone, and the per-course route carries the same data", async (t) => {
   const { base } = await boot(t);
-  const res = await fetch(`${base}/api/learning`);
-  const text = await res.text();
 
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "application/json; charset=utf-8");
-  assert.equal(text, JSON.stringify(parseLearning(BASIC), null, 2), "alias must not drift");
-  assert.deepEqual(Object.keys(JSON.parse(text)), ["projectDir", "present", "mission", "plan", "schema"]);
+  // Removed with the vanilla UI in P2. A revert restores both, which is why they went together.
+  const gone = await fetch(`${base}/api/learning`);
+  assert.equal(gone.status, 404);
+  assert.match((await gone.json()).error, /removed/);
+
+  // Nothing was lost: the per-course route returns the identical LearningData shape.
+  const perCourse = await fetch(`${base}/api/courses/course-basic/learning`);
+  assert.equal(perCourse.status, 200);
+  const body = await perCourse.json();
+  assert.deepEqual(Object.keys(body), ["projectDir", "present", "mission", "plan", "schema"]);
+  assert.deepEqual(body, parseLearning(BASIC));
 });
 
 test("a course with no concepts still returns a usable tree, not an error", async (t) => {
@@ -294,15 +308,21 @@ test("static files are served and path traversal is refused", async (t) => {
 });
 
 test("the server binds an ephemeral port when asked for 0", async (t) => {
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
     projectDir: BASIC,
     coursesRoot: FIXTURES,
     registryPath: join(BASIC, ".agent", "courses.json"),
+    staticDir,
     chat: false,
     watch: false,
   });
-  t.after(() => running.close());
+  t.after(async () => {
+    await running.close();
+    rmSync(staticDir, { recursive: true, force: true });
+  });
   assert.ok(running.port > 0);
   assert.equal((await fetch(`http://127.0.0.1:${running.port}/health`)).status, 200);
 });

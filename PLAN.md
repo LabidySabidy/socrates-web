@@ -55,6 +55,10 @@ Fixes the live defect and lays the event log everything else reads.
   misconception row round-trips its severity through parser and projection.
 
 ### P2 — Frontend scaffold + real-data course browser (Vite + React + TS)
+**Dev workflow:** `npm run build` (builds `web/`), then `npm start`. For live reload, run
+`npm run dev:api` and `npm run dev:ui` — the Vite server proxies `/api` to Node on 3850.
+The static root is `web/dist`; `public/` and the `/api/learning` alias were removed together in the
+cutover commit, so one `git revert` restores the old UI.
 - Vite + React + TS under `web/`; dev server proxies `/api` to Node; Node serves `dist/` in prod.
 - Handoff tokens as CSS custom properties; Cormorant Garamond + Lora; outline-only buttons, hairline
   rules, whisper shadows, `prefers-reduced-motion` gate.

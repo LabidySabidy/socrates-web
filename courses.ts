@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseLearning } from "./learning-parser.ts";
-import { slug } from "./course-model.ts";
+import { countByMastery, masteryOf, slug } from "./course-model.ts";
 
 export const REGISTRY_VERSION = 1;
 
@@ -40,6 +40,8 @@ export interface CourseRef {
   hidden: boolean;
   order: number | null;
   concepts: number;
+  /** Per-state counts over the course's unique concept cards, for the catalogue metrics. */
+  masteryCounts: Record<string, number>;
   kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;
@@ -149,22 +151,32 @@ function isIgnored(dir: string, registry: Registry): boolean {
 // Discovery
 // ---------------------------------------------------------------------------
 
-function describe(dir: string): { title: string; concepts: number; kind: CourseRef["kind"] } {
+function describe(dir: string): {
+  title: string;
+  concepts: number;
+  masteryCounts: Record<string, number>;
+  kind: CourseRef["kind"];
+} {
   try {
     const data = parseLearning(dir);
     const manifestPath = join(learningDir(dir), "COURSE.md");
     const kind = existsSync(manifestPath) && /^kind:\s*codebase\s*$/m.test(readFileSync(manifestPath, "utf8"))
       ? "codebase"
       : "topic";
+    // Unique by slug so the catalogue agrees with the unit count the course page renders.
+    const seen = new Map<string, string>();
+    for (const c of data.schema.concepts) {
+      if (!seen.has(slug(c.name))) seen.set(slug(c.name), c.badge);
+    }
+    const masteryCounts = countByMastery([...seen.values()].map((badge) => masteryOf(badge)));
     return {
       title: data.mission.destination.trim() || basename(dir),
-      // Counted uniquely, matching the derivation: duplicate card names collapse to one unit,
-      // so a card count here would disagree with the unit count the course page renders.
-      concepts: new Set(data.schema.concepts.map((c) => slug(c.name))).size,
+      concepts: seen.size,
+      masteryCounts,
       kind,
     };
   } catch {
-    return { title: basename(dir), concepts: 0, kind: "topic" };
+    return { title: basename(dir), concepts: 0, masteryCounts: {}, kind: "topic" };
   }
 }
 
@@ -252,6 +264,7 @@ export function discoverCourses(opts: {
       hidden: entry?.hidden === true,
       order: entry?.order ?? null,
       concepts: details.concepts,
+      masteryCounts: details.masteryCounts,
       kind: details.kind,
       fromScan,
       fromRegistry,

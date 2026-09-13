@@ -116,21 +116,35 @@
       `registry-migrated-to-7-columns`.
 
 ## P2 — Frontend scaffold + real-data course browser (Vite + React + TS)
-- [ ] **T-017** `web/` Vite + React + TS scaffold, dev proxy `/api` → Node, tokens as CSS custom properties,
+- [x] **T-017** `web/` Vite + React + TS scaffold, dev proxy `/api` → Node, tokens as CSS custom properties,
       self-hosted-or-fallback fonts. **Done when:** `tsc --noEmit` and `vite build` are clean.
-- [ ] **T-018** Hash router + app shell (top bar, emblem, wordmark). **Done when:** routes round-trip and
+      **Done** — React 19 / Vite 8 / strict TS; `tsc --noEmit` clean, `vite build` 28 modules → 235 kB (74 kB gzip).
+      Tokens in `web/src/theme.css`; the font stack has serif fallbacks behind the Google Fonts link.
+- [x] **T-018** Hash router + app shell (top bar, emblem, wordmark). **Done when:** routes round-trip and
       back/forward work.
-- [ ] **T-019** Course page: unit rail (mastery rings, `aria-current`, course switcher) + module pane
+      **Done** — `#/home`, `#/course/:id`, `#/course/:id/:unit`; an empty hash is normalised so URLs are
+      shareable. Hashes need no SPA catch-all, so dev and prod route identically.
+- [x] **T-019** Course page: unit rail (mastery rings, `aria-current`, course switcher) + module pane
       (lesson groups, module rows, type icons) from real data. **Done when:** browser-verified against a real course.
-- [ ] **T-020** Home catalogue (greeting, continue strip, mastery counts, course grid) from real data.
+      **Done** — browser-verified via agent-browser: switching course replaced the whole rail
+      (`react-state/hooks` → `alpha-one/beta-two/gamma-three`); selecting a unit updated the heading, the
+      breadcrumb, `aria-current`, the ring stroke (`#4a6fa5` 0.50 → `#2d7a4c` 0.78) and the module pane.
+- [x] **T-020** Home catalogue (greeting, continue strip, mastery counts, course grid) from real data.
       **Done when:** browser-verified; no fabricated percentage anywhere.
-- [ ] **T-021** Telemetry rail: SM-2 panel, misconception tray, "Memory strength (SM-2 estimate)" with an
+      **Done** — counts summed from each course's real `masteryCounts` (Mastered 1 / Proficient 2 / Familiar 4
+      over 8 courses). **The continue strip is deliberately absent**: recency needs the session journal, which
+      has no endpoint yet, and a fabricated percentage there is exactly what this project removed.
+- [x] **T-021** Telemetry rail: SM-2 panel, misconception tray, "Memory strength (SM-2 estimate)" with an
       "insufficient data" state. **Done when:** browser-verified; every number traces to a real field.
-- [ ] **T-033** Misconception tray renders **one row per id**, never duplicates. Dot + label by
+      **Done** — SM-2 reads the five SCHEMA.md fields; the estimate documents its formula in `web/src/memory.ts`
+      and reports "insufficient data" rather than 0% when nothing has been reviewed.
+- [x] **T-033** Misconception tray renders **one row per id**, never duplicates. Dot + label by
       `severityState`, colour as stroke: root `#c83f3f` · partial `#d97706` · edge `#d4a72c` ·
       resolved `#c9c6bd` · unrated neutral. No counts, no repeated beliefs.
-      **Done when:** browser-verified against a course whose registry holds duplicate ids (the fixture has
-      `MIS-003` ×3) and the tray shows one row; the backend duplicate warning is still emitted but not shown.
+      **Done** — browser-verified against the `course-duplicate-misconceptions` fixture (created for this
+      check; registry holds `MIS-003` ×3): rendered ids are `MIS-003` ×1, `MIS-004`, `MIS-005`, `MIS-006`,
+      ordered root → partial → unrated → resolved, header reads "3 uncorrected". The backend
+      `duplicate-registry-row` warning is still emitted and still not shown.
       **Accepted limitation (do not fix unless asked):** resolution outranks severity, so a resolved `root`
       misconception no longer displays as fundamental. If it ever matters, render resolved rows with the
       severity dot at low opacity — the stored rating is still in the row and in the event log.
@@ -138,10 +152,12 @@
       wanted. **Done when:** the user confirms in writing; if not, the scope is updated before T-023.
       **CONFIRMED in writing 2026-09-13** — ship the sparser Home. Every number shown must have a backing field;
       "Continue where you left off" is backed only by the session journal.
-- [ ] **T-023** Cutover, **last action of the phase**: serve `web/dist`, delete `public/`, delete the
+- [x] **T-023** Cutover, **last action of the phase**: serve `web/dist`, delete `public/`, delete the
       `/api/learning` alias — one commit, so a single `git revert` restores the old UI.
-      **Done when:** the new UI is browser-verified end to end *before* the deletion, and afterwards `npm start`
-      serves it from `web/dist`.
+      **Done** — the built UI was browser-verified from the Node server on 3850 **before** the deletion, then
+      `public/` and the alias were removed in the same commit. Static root is `web/dist` and the server warns
+      when it is missing; `web/dist/` is gitignored and `npm run build` produces it. Tests pass a throwaway
+      `staticDir`, so `npm test` does not depend on the build having run.
 
 ## P3 — Add-a-course
 - [ ] **T-024** "Add course" form → `POST /api/courses`; hide/ignore affordances; no-results state.

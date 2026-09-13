@@ -29,3 +29,6 @@ test/fixtures/**/.agent/learning/events.jsonl
 test/fixtures/**/.agent/learning/SESSIONS/
 test/fixtures/**/.agent/learning/telemetry-errors.log
 test/fixtures/**/.agent/telemetry*
+
+# Frontend build output (run `npm run build`)
+web/dist/

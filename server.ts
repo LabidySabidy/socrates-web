@@ -44,6 +44,8 @@ export interface ServerOptions {
   coursesRoot?: string | null;
   registryPath?: string;
   publicDir?: string;
+  /** Static root. Defaults to web/dist — the old vanilla UI in public/ was retired in P2. */
+  staticDir?: string;
   /** Wire POST /api/chat + GET /api/stream (spawns pi lazily). Off in tests. */
   chat?: boolean;
   /** Hot-reload watchers per course. Off in tests. */
@@ -124,7 +126,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       ? opts.coursesRoot
       : process.env.COURSES_ROOT ?? defaultCoursesRoot(projectDir);
   const registryPath = opts.registryPath ?? join(projectDir, ".agent", "courses.json");
-  const publicDir = opts.publicDir ?? join(dirname(fileURLToPath(import.meta.url)), "public");
+  const publicDir =
+    opts.staticDir ??
+    opts.publicDir ??
+    join(dirname(fileURLToPath(import.meta.url)), "web", "dist");
+  if (!existsSync(publicDir)) {
+    console.warn(`[static] ${publicDir} does not exist — run \`npm run build\` (web/ has its own build)`);
+  }
   const chatEnabled = opts.chat !== false;
   const watchEnabled = opts.watch !== false;
 
@@ -382,13 +390,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       return;
     }
 
-    // --- alias: the default course, byte-compatible with the pre-course API --
+    // --- legacy alias removed in P2 -----------------------------------------
+    // /api/learning used to serve the default course. The course routes replace it; the old
+    // vanilla UI that consumed it was deleted in the same commit, so a single revert restores both.
     if (url === "/api/learning") {
-      try {
-        sendJson(res, 200, parseLearning(projectDir));
-      } catch (err) {
-        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-      }
+      sendJson(res, 404, {
+        error: "/api/learning was removed",
+        use: `/api/courses/<id>/learning`,
+      });
       return;
     }
 
