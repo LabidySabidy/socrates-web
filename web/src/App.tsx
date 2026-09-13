@@ -36,6 +36,7 @@ export function App() {
           data={data}
           visible={visible}
           error={unknownRoute ? `Unknown route: #/${route.raw}` : error}
+          onChanged={load}
         />
       )}
     </>

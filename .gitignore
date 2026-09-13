@@ -27,7 +27,12 @@ docs/handoff-shots/
 # Same rule as GL-019: these embed absolute paths and therefore the OS username.
 test/fixtures/**/.agent/learning/events.jsonl
 test/fixtures/**/.agent/learning/SESSIONS/
+# ...except a fixture that deliberately ships a journal, so the reader has something real
+# to parse. Runtime artifacts in every OTHER fixture stay ignored.
+!test/fixtures/course-with-journal/.agent/learning/SESSIONS/
 test/fixtures/**/.agent/learning/telemetry-errors.log
+# The registry is runtime state too — a test that registers a course must not dirty a fixture.
+test/fixtures/**/.agent/courses.json
 test/fixtures/**/.agent/telemetry*
 
 # Frontend build output (run `npm run build`)

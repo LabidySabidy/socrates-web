@@ -160,8 +160,30 @@
       `staticDir`, so `npm test` does not depend on the build having run.
 
 ## P3 — Add-a-course
-- [ ] **T-024** "Add course" form → `POST /api/courses`; hide/ignore affordances; no-results state.
+- [x] **T-024** "Add course" form → `POST /api/courses`; hide/ignore affordances; no-results state.
       **Done when:** browser-verified — an added course survives a restart; hiding removes it without touching disk.
+      **Done** — browser-verified: registering a course outside the scan root from the form wrote the registry
+      (`fromScan: false, fromRegistry: true`), it appeared in the catalogue, Hide moved it out of the grid while
+      keeping it in the manage list (`hidden: true`, visible 9 of 10), Unhide restored it, and a search with no
+      matches rendered the no-results panel with a working Clear filters. Disk is never touched by any action.
+      A test now gitignores `test/fixtures/**/.agent/courses.json` so registering cannot dirty a fixture.
+- [x] **T-035** Journal endpoint — read a course's `SESSIONS/` (and its `events.jsonl`) so session history is
+      reachable by the client. `GET /api/courses/:id/journal` (sessions newest-first with date, turns,
+      concepts touched, transcript path) and `GET /api/courses/:id/journal/:file` for one session's markdown.
+      `CourseRef` gains `sessions: { count, lastAt }` **parsed from the SESSIONS filenames**, so the catalogue
+      knows recency without reading every course's log.
+      **Done** — `journal.ts` + 9 unit tests + 5 route tests. Content comes from the SESSIONS *projection*, not
+      the raw event schema; `events.jsonl` is read only for counts, so the client is not coupled to the
+      writer's internal shape. Degrades: no journal → empty list, malformed log line counted and skipped,
+      traversal and non-session names refused with 404.
+- [x] **T-036** **The continue strip** — a headline element of the design reference, backed ONLY by the journal.
+      Pick the course with the most recent session and show the real date, session count, and where it stopped.
+      It must render nothing at all when no course has a journal entry — never a placeholder percentage.
+      **Done** — browser-verified **both ways**: with a journal the strip reads "Continue where you left off /
+      resume from a previous session … / Last session Sep 10, 2026 · 2 sessions · not closed cleanly"; against a
+      root whose courses have no sessions, `.resume` count is 0, the phrase appears 0 times, cards show no
+      session counts, and the rest of the catalogue renders unchanged. `mostRecent()` is unit-tested to return
+      null when no course has a journal, when a count has no timestamp, and to pick by recency not volume.
 
 ## P4 — Bridge restart on switch + chat-first lesson
 - [ ] **T-025** `process-bridge.ts` `switchCourse(dir)` — kill tree, warm respawn; mid-turn switch kills the
@@ -184,3 +206,8 @@
 ## Backlog — flagged, deliberately not built
 - [ ] **T-034** Derived persistence signal — review cycles survived — rendered as a small tick, never a
       colour. Behaviourally grounded, so honest to derive. **Not to be started without an explicit ask.**
+- [x] **T-037** Client test for the tray + mastery colour mapping, so drift is caught without a browser.
+      **Done** — `web/src/ui.test.ts`, 11 tests, run by `npm --prefix web test` and wired into the root
+      `npm test` so it cannot be orphaned. Covers the one-row-per-id collapse and its winner rules, severity
+      ordering, the five mastery states, the memory-strength "insufficient data" case and its monotonicity,
+      `filterCourses`, and `mostRecent`. Pure logic moved to `web/src/select.ts` so it needs no browser.

@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseLearning } from "./learning-parser.ts";
 import { countByMastery, masteryOf, slug } from "./course-model.ts";
+import { sessionIndex } from "./journal.ts";
 
 export const REGISTRY_VERSION = 1;
 
@@ -42,6 +43,8 @@ export interface CourseRef {
   concepts: number;
   /** Per-state counts over the course's unique concept cards, for the catalogue metrics. */
   masteryCounts: Record<string, number>;
+  /** Session recency, parsed from SESSIONS file names — no log reads. */
+  sessions: { count: number; lastAt: string | null };
   kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;
@@ -155,8 +158,10 @@ function describe(dir: string): {
   title: string;
   concepts: number;
   masteryCounts: Record<string, number>;
+  sessions: { count: number; lastAt: string | null };
   kind: CourseRef["kind"];
 } {
+  const sessions = sessionIndex(dir);
   try {
     const data = parseLearning(dir);
     const manifestPath = join(learningDir(dir), "COURSE.md");
@@ -173,10 +178,11 @@ function describe(dir: string): {
       title: data.mission.destination.trim() || basename(dir),
       concepts: seen.size,
       masteryCounts,
+      sessions,
       kind,
     };
   } catch {
-    return { title: basename(dir), concepts: 0, masteryCounts: {}, kind: "topic" };
+    return { title: basename(dir), concepts: 0, masteryCounts: {}, sessions, kind: "topic" };
   }
 }
 
@@ -265,6 +271,7 @@ export function discoverCourses(opts: {
       order: entry?.order ?? null,
       concepts: details.concepts,
       masteryCounts: details.masteryCounts,
+      sessions: details.sessions,
       kind: details.kind,
       fromScan,
       fromRegistry,

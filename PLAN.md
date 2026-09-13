@@ -44,14 +44,16 @@ Fixes the live defect and lays the event log everything else reads.
 - `courses.ts`: scan `COURSES_ROOT` one level for `*/.agent/learning`, `.agent/courses.json` overlay
   (pin / order / label / hide / add), ignore list.
 - API: `GET /api/courses`, `GET /api/courses/:id`, `GET /api/courses/:id/learning`,
-  `POST /api/courses`; `GET /api/learning` unchanged as an alias for the default course.
+  `POST /api/courses`; `GET /api/learning` was an alias for the default course until the P2 cutover removed it
+  with the old UI (T-023).
 - Extend the debounced watcher to N courses.
 - **Misconception severity** — tutor-emitted `root`/`partial`/`edge`, stored as the 7th registry column and
   an optional `record_learning` field; blank means unrated. Never inferred from prose. `resolved`/`unrated`
   are derived display states. Shared format: extension projection + `learning-parser.ts` + SCHEMA template,
   landed together.
 - **Done when:** `curl /api/courses` lists real discovered courses; `/api/courses/DriftScout` returns a
-  units tree derived with zero new files; `/api/learning` still returns the old shape byte-for-byte; a
+  units tree derived with zero new files; **`GET /api/courses/:id/learning`** returns clean structured JSON
+  for that course; a
   misconception row round-trips its severity through parser and projection.
 
 ### P2 — Frontend scaffold + real-data course browser (Vite + React + TS)
@@ -128,7 +130,8 @@ cutover commit, so one `git revert` restores the old UI.
 
 ## Acceptance criteria
 - [ ] `npm test` passes (server + model + courses suites), `tsc --noEmit` and `vite build` clean in `web/`.
-- [ ] `/api/learning` returns the old shape; `/api/courses` and `/api/courses/:id` return real data.
+- [ ] `GET /api/courses/:id/learning` returns clean structured JSON per course (`/api/learning` was
+      removed with the vanilla UI in P2 — see T-023); `GET /api/courses` and `GET /api/courses/:id` return real data.
 - [ ] SCHEMA.md watcher still hot-reloads, now across N courses.
 - [ ] Browser-verified per phase: catalogue, course switch, unit selection, chat streaming from real
       pi, quiz branches (correct / incorrect / hints 1/3→3/3 / two-mistake gate / completion),

@@ -36,6 +36,7 @@ import {
   type DiscoveryResult,
 } from "./courses.ts";
 import { ProcessBridge } from "./process-bridge.ts";
+import { readJournal, readSessionMarkdown } from "./journal.ts";
 
 export interface ServerOptions {
   port?: number;
@@ -374,8 +375,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       return;
     }
 
-    const learningMatch = /^\/api\/courses\/([^/]+)\/learning$/.exec(url);
-    if (learningMatch && req.method === "GET") {
+    const learningMatch = /^\/api\/courses\/([^/]+)\/learning$/.exec(url);    if (learningMatch && req.method === "GET") {
       const result = discover();
       const ref = findCourse(result, decodeURIComponent(learningMatch[1]));
       if (!ref) {
@@ -384,6 +384,43 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
       try {
         sendJson(res, 200, parseLearning(ref.dir));
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // --- journal: session history for one course -----------------------------
+    const journalFileMatch = /^\/api\/courses\/([^/]+)\/journal\/([^/]+)$/.exec(url);
+    if (journalFileMatch && req.method === "GET") {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(journalFileMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${journalFileMatch[1]}` });
+        return;
+      }
+      const file = decodeURIComponent(journalFileMatch[2]);
+      const markdown = readSessionMarkdown(ref.dir, file);
+      if (markdown === null) {
+        // Refused names and absent files are the same answer: never echo the path back.
+        sendJson(res, 404, { error: "no such session" });
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+      res.end(markdown);
+      return;
+    }
+
+    const journalMatch = /^\/api\/courses\/([^/]+)\/journal$/.exec(url);
+    if (journalMatch && req.method === "GET") {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(journalMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${journalMatch[1]}` });
+        return;
+      }
+      try {
+        sendJson(res, 200, { id: ref.id, dir: ref.dir, ...readJournal(ref.dir) });
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
       }

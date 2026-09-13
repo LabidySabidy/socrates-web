@@ -89,6 +89,8 @@ export interface CourseRef {
   concepts: number;
   /** Per-state counts over the course's unique concept cards, for the catalogue metrics. */
   masteryCounts: Record<MasteryState, number>;
+  /** Session recency, from the SESSIONS file names — no log reads. */
+  sessions: { count: number; lastAt: string | null };
   kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;
@@ -115,8 +117,7 @@ export interface Misconception {
 export type Severity = "root" | "partial" | "edge";
 export type SeverityState = Severity | "resolved" | "unrated";
 
-export interface LearningData {
-  projectDir: string;
+export interface LearningData {  projectDir: string;
   present: string[];
   mission: Mission;
   plan: Plan;
@@ -136,4 +137,32 @@ export interface LearningData {
     }[];
     misconceptions: Misconception[];
   };
+}
+
+/** One session in a course's journal. Content comes from SESSIONS/*.md, not the raw event log. */
+export interface SessionSummary {
+  file: string;
+  startedAt: string;
+  endedAt: string | null;
+  open: boolean;
+  turns: number | null;
+  concepts: string[];
+  misconceptions: number;
+  gaps: number;
+  transcript: string | null;
+  bytes: number;
+}
+
+export interface Journal {
+  id: string;
+  dir: string;
+  sessions: SessionSummary[];
+  events: {
+    present: boolean;
+    count: number;
+    malformed: number;
+    lastTs: string | null;
+    telemetryMissing: number;
+  };
+  warnings: string[];
 }

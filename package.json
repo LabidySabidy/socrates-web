@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "start": "node server.ts",
-    "test": "node --test learning-parser.test.ts bridge.test.ts course-model.test.ts courses.test.ts server.test.ts",
+    "test": "node --test learning-parser.test.ts bridge.test.ts course-model.test.ts courses.test.ts journal.test.ts server.test.ts && npm --prefix web test",
     "build": "npm --prefix web run build",
     "dev:api": "node server.ts",
-    "dev:ui": "npm --prefix web run dev"
+    "dev:ui": "npm --prefix web run dev",
+    "gate": "npm test && npm --prefix web run typecheck && npm run build"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1"

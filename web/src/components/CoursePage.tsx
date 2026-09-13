@@ -7,6 +7,7 @@ import { hrefCourse, hrefHome } from "../router.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
+import { JournalPanel } from "./JournalPanel.tsx";
 
 const LEGEND = [
   { label: "Not started", color: "#c9c6bd" },
@@ -187,6 +188,7 @@ export function CoursePage({
           )}
 
           <TelemetryRail learning={learning} />
+          <JournalPanel courseId={courseId} />
         </div>
       </main>
     </div>

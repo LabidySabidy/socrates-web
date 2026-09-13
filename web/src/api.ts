@@ -1,5 +1,5 @@
 /** api.ts — the only place the client talks to the server. */
-import type { CourseRef, CourseTree, CoursesResponse, LearningData } from "./types.ts";
+import type { CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: "application/json" } });
@@ -41,4 +41,17 @@ export async function postCourse(body: {
     body: JSON.stringify(body),
   });
   return (await res.json()) as RegisterResult;
+}
+
+/** Session history for a course. Content comes from the SESSIONS projection, not the raw log. */
+export const fetchJournal = (id: string) =>
+  get<Journal>(`/api/courses/${encodeURIComponent(id)}/journal`);
+
+/** One session's markdown, as the writer produced it. */
+export async function fetchSessionMarkdown(id: string, file: string): Promise<string> {
+  const res = await fetch(
+    `/api/courses/${encodeURIComponent(id)}/journal/${encodeURIComponent(file)}`,
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
 }

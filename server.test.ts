@@ -280,6 +280,59 @@ test("POST /api/courses rejects a non-course, a missing dir, and an unknown acti
   assert.match(badAction.body.error, /unknown action/);
 });
 
+test("GET /api/courses/:id/journal returns session history newest-first", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/courses/course-with-journal/journal`);
+
+  assert.equal(status, 200);
+  assert.equal(body.id, "course-with-journal");
+  assert.deepEqual(body.warnings, []);
+  assert.deepEqual(
+    body.sessions.map((s: { file: string }) => s.file),
+    ["2026-09-10-0741-01a099ad.md", "2026-09-08-0900-0a1b2c3d.md"],
+  );
+  assert.equal(body.sessions[0].open, true);
+  assert.deepEqual(body.sessions[1].concepts, ["journal-concept"]);
+  assert.equal(body.sessions[1].turns, 4);
+  assert.equal(body.events.present, false, "the fixture ships no runtime log");
+});
+
+test("a course with no journal returns an empty list, not an error", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/courses/course-basic/journal`);
+  assert.equal(status, 200);
+  assert.deepEqual(body.sessions, []);
+  assert.equal(body.events.present, false);
+});
+
+test("GET /api/courses/:id/journal/:file serves one session's markdown", async (t) => {
+  const { base } = await boot(t);
+  const res = await fetch(`${base}/api/courses/course-with-journal/journal/2026-09-08-0900-0a1b2c3d.md`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type")!, /text\/markdown/);
+  const text = await res.text();
+  assert.match(text, /^- \*\*Turns:\*\* 4$/m);
+  assert.match(text, /journal-concept/);
+});
+
+test("the journal file route refuses traversal and unknown names", async (t) => {
+  const { base } = await boot(t);
+  for (const name of ["..%2FSCHEMA.md", "SCHEMA.md", "2026-01-01-0000-deadbeef.md"]) {
+    const res = await fetch(`${base}/api/courses/course-with-journal/journal/${name}`);
+    assert.equal(res.status, 404, `expected 404 for ${name}`);
+  }
+});
+
+test("the catalogue reports session recency from file names alone", async (t) => {
+  const { base } = await boot(t);
+  const { body } = await getJson(`${base}/api/courses`);
+  const journalCourse = body.courses.find((c: { id: string }) => c.id === "course-with-journal");
+  assert.deepEqual(journalCourse.sessions, { count: 2, lastAt: "2026-09-10T07:41:00.000Z" });
+
+  const plain = body.courses.find((c: { id: string }) => c.id === "course-basic");
+  assert.deepEqual(plain.sessions, { count: 0, lastAt: null });
+});
+
 test("chat routes are absent when chat is disabled, and health still answers", async (t) => {
   const { base } = await boot(t);
   const chat = await fetch(`${base}/api/chat`, {
