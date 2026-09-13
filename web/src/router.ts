@@ -9,18 +9,22 @@
  *   #/course/:courseId/:unitNumber
  */
 import { useEffect, useState } from "react";
+import { splitHash } from "./grill.ts";
 
 export type Route =
   | { name: "home" }
   | { name: "course"; courseId: string; unit: number | null }
-  | { name: "lesson"; courseId: string; unit: number }
+  | { name: "lesson"; courseId: string; unit: number; ask: string | null }
   | { name: "quiz"; courseId: string; unit: number }
   | { name: "lab"; courseId: string; unit: number }
   | { name: "unknown"; raw: string };
 
 export function parseHash(hash: string): Route {
-  const raw = hash.replace(/^#\/?/, "");
-  const parts = raw.split("/").filter(Boolean);
+  // The query is split off first: it can carry a prompt to dispatch, and leaving it attached would
+  // feed `1?ask=…` to the unit parser.
+  const { path, params } = splitHash(hash);
+  const parts = path.split("/").filter(Boolean);
+  const ask = params.get("ask");
   if (parts.length === 0 || parts[0] === "home") return { name: "home" };
   if (parts[0] === "lesson" && parts[1]) {
     const unit = Number(parts[2]);
@@ -28,6 +32,7 @@ export function parseHash(hash: string): Route {
       name: "lesson",
       courseId: decodeURIComponent(parts[1]),
       unit: Number.isFinite(unit) && unit > 0 ? unit : 1,
+      ask: ask && ask.trim() ? ask : null,
     };
   }
   if (parts[0] === "lab" && parts[1]) {
@@ -50,7 +55,7 @@ export function parseHash(hash: string): Route {
       unit: unit !== null && Number.isFinite(unit) && unit > 0 ? unit : null,
     };
   }
-  return { name: "unknown", raw };
+  return { name: "unknown", raw: hash };
 }
 
 export function hrefHome(): string {

@@ -6,6 +6,7 @@ import { MASTERY_STATES, mastery } from "../severity.ts";
 import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { useCourseWatch } from "../watch.ts";
+import { grillHref, grillPrompt } from "../grill.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
@@ -111,6 +112,16 @@ export function CoursePage({
   }
 
   const selected: Unit | null = tree.units.find((u) => u.n === unitNumber) ?? tree.units[0] ?? null;
+
+  /**
+   * Where a grill click should go: the unit whose title IS the concept (the derived model is one unit
+   * per concept card), falling back to the unit on screen. Ported from the original click handler,
+   * which posted `/skill:grill-misconception <concept>` directly.
+   */
+  const grillTo = (concept: string) => {
+    const unit = tree.units.find((u) => u.title.toLowerCase() === concept.toLowerCase());
+    return grillHref(courseId, unit?.n ?? selected?.n ?? 1, grillPrompt(concept));
+  };
   const current = courses.find((c) => c.id === courseId);
 
   return (
@@ -258,7 +269,7 @@ export function CoursePage({
             </div>
           )}
 
-          <TelemetryRail learning={learning} />
+          <TelemetryRail learning={learning} grillHref={grillTo} />
           <JournalPanel courseId={courseId} />
         </div>
       </main>

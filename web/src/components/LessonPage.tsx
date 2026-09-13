@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchCourse } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
-import { hrefCourse } from "../router.ts";
+import { hrefCourse, hrefLesson } from "../router.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, type TurnState } from "../turn.ts";
 
@@ -25,10 +25,13 @@ interface ChatResponse {
 export function LessonPage({
   courseId,
   unitNumber,
+  ask,
   onExit,
 }: {
   courseId: string;
   unitNumber: number;
+  /** A prompt to dispatch on arrival — how a tray or rail click starts a grill. */
+  ask?: string | null;
   onExit: () => void;
 }) {
   const [tree, setTree] = useState<CourseTree | null>(null);
@@ -39,6 +42,8 @@ export function LessonPage({
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** A dispatched grill fires exactly once, however many times the component re-renders. */
+  const dispatched = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -59,6 +64,19 @@ export function LessonPage({
   const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? tree?.units[0] ?? null;
   const { thinking, prose } = splitTurn(turn);
 
+  // Dispatch an arriving prompt once: seed the composer so the learner can SEE what is being asked on
+  // their behalf, then send it. The param is stripped from the URL so a reload cannot re-fire it.
+  useEffect(() => {
+    if (!ask || dispatched.current === ask) return;
+    dispatched.current = ask;
+    setInput(ask);
+    // Strip the ask but STAY on the lesson: replaceState does not re-route, so writing the course
+    // route here left the URL describing a different screen than the one on display.
+    window.history.replaceState(null, "", hrefLesson(courseId, unitNumber));
+    void send(ask);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the ask value only
+  }, [ask, courseId, unitNumber]);
+
   function exit() {
     // The course page saves its own scroll offset on the way in (there is no .pane here).
     streamRef.current?.close();
@@ -66,8 +84,8 @@ export function LessonPage({
     onExit();
   }
 
-  async function send() {
-    const message = input.trim();
+  async function send(explicit?: string) {
+    const message = (explicit ?? input).trim();
     if (!message || busy) return;
     setInput("");
     setBusy(true);

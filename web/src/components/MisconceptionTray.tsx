@@ -12,7 +12,14 @@ function SeverityDot({ state }: { state: keyof typeof SEVERITY_COLOR }) {
   );
 }
 
-export function MisconceptionTray({ misconceptions }: { misconceptions: Misconception[] }) {
+export function MisconceptionTray({
+  misconceptions,
+  grillHref,
+}: {
+  misconceptions: Misconception[];
+  /** Where a click on a row should go. Resolved by the page, which knows the units. */
+  grillHref?: (concept: string) => string;
+}) {
   const rows = trayRows(misconceptions);
   const active = activeCount(rows);
 
@@ -33,6 +40,15 @@ export function MisconceptionTray({ misconceptions }: { misconceptions: Misconce
               <span className="tray-concept">{row.concept}</span>
               <SeverityDot state={row.severity} />
             </header>
+            {grillHref ? (
+              <a
+                className="tray-grill"
+                href={grillHref(row.concept)}
+                title={`grill this concept`}
+              >
+                Grill {row.concept}
+              </a>
+            ) : null}
             <p className="tray-body">{row.misconception}</p>
             {row.corrected ? <p className="tray-corrected">Corrected: {row.corrected}</p> : null}
           </article>

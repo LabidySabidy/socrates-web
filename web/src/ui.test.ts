@@ -40,6 +40,8 @@ import {
   tryAgain,
 } from "./quiz.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
+import { grillHref, grillPrompt, isGrillPrompt, parseAsk } from "./grill.ts";
+import { parseHash } from "./router.ts";
 import type { CourseRef, LearningData, Misconception } from "./types.ts";
 
 const mis = (over: Partial<Misconception>): Misconception =>
@@ -926,4 +928,55 @@ test("a short-answer item still offers Check, and a self-check offers Show solut
   assert.equal(actionLabel(fresh, prose), "Show solution");
   assert.equal(actionLabel(fresh), "Check", "no item means the default label");
   assert.equal(canSkip(fresh), true, "Skip is available on a self-check item too");
+});
+
+// ---------------------------------------------------------------------------
+// P9 — grill dispatch
+// ---------------------------------------------------------------------------
+
+test("the grill prompt is the mechanism, and is exactly what the original posted", () => {
+  // Ported from 06cee66^:public/app.js:84 — `chat(`/skill:grill-misconception ${c.name}`)`
+  assert.equal(grillPrompt("react-state"), "/skill:grill-misconception react-state");
+  assert.equal(grillPrompt("  idempotent-migrations  "), "/skill:grill-misconception idempotent-migrations");
+  assert.equal(isGrillPrompt(grillPrompt("x")), true);
+  assert.equal(isGrillPrompt("what is state?"), false);
+});
+
+test("a grill href round-trips its prompt", () => {
+  const href = grillHref("DriftScout", 2, grillPrompt("rls-policies"));
+  assert.match(href, /^#\/lesson\/DriftScout\/2\?ask=/);
+  assert.equal(parseAsk(href), "/skill:grill-misconception rls-policies");
+});
+
+test("the ask parameter does not corrupt the unit it travels with", () => {
+  // Regression guard: splitting the query late fed `1?ask=%2Fskill...` to Number(), which is NaN, which
+  // silently fell back to unit 1 — the grill would have opened the wrong unit every time.
+  const route = parseHash(grillHref("DriftScout", 3, grillPrompt("client-data-flow")));
+  assert.equal(route.name, "lesson");
+  if (route.name !== "lesson") return;
+  assert.equal(route.courseId, "DriftScout");
+  assert.equal(route.unit, 3, "the unit survives the query string");
+  assert.equal(route.ask, "/skill:grill-misconception client-data-flow");
+});
+
+test("a lesson without an ask is unchanged, and the other routes still parse", () => {
+  const plain = parseHash("#/lesson/alg/2");
+  assert.equal(plain.name, "lesson");
+  if (plain.name === "lesson") assert.equal(plain.ask, null);
+
+  assert.equal(parseHash("#/home").name, "home");
+  assert.equal(parseHash("").name, "home");
+  const course = parseHash("#/course/alg/3");
+  assert.equal(course.name, "course");
+  if (course.name === "course") assert.equal(course.unit, 3);
+  assert.equal(parseHash("#/quiz/alg/1").name, "quiz");
+  assert.equal(parseHash("#/lab/alg/1").name, "lab");
+  assert.equal(parseHash("#/nonsense").name, "unknown");
+});
+
+test("an empty or absent ask is null, never an empty prompt", () => {
+  assert.equal(parseAsk("#/lesson/x/1"), null);
+  assert.equal(parseAsk("#/lesson/x/1?ask="), null);
+  assert.equal(parseAsk("#/lesson/x/1?ask=%20%20"), null);
+  assert.equal(parseAsk("#/lesson/x/1?other=1&ask=hi"), "hi");
 });

@@ -327,3 +327,30 @@
       `npm test` so it cannot be orphaned. Covers the one-row-per-id collapse and its winner rules, severity
       ordering, the five mastery states, the memory-strength "insufficient data" case and its monotonicity,
       `filterCourses`, and `mostRecent`. Pure logic moved to `web/src/select.ts` so it needs no browser.
+
+## P9–P12 — recover the four features dropped in the P2 cutover
+
+> Plan and the recovered source quotes: `.agent/plans/P9-P12-recover-dropped-features.md`.
+> Source is `06cee66^:public/app.js`, not the audit.
+
+- [x] **T-046** Grill-misconception dispatch (REDESIGN). **Done when:** clicking a misconception row or a
+      concept name navigates to the lesson with the exact `/skill/grill-misconception <concept>` prompt
+      seeded, dispatches it against the real bridge, and a reload does not re-send.
+      **Done** — `web/src/grill.ts` (prompt, href, ask parsing) + a Grill action on every tray row and every
+      SM-2 concept name. The href resolves the concept to ITS unit (react-state → 1, hooks → 2), which the
+      derived model makes exact. The lesson seeds the composer so the learner sees what is asked on their
+      behalf, dispatches once, then strips the parameter.
+      **Browser-verified against the real bridge:** the click landed on unit 2 with a streamed reply and 7,754
+      chars of reasoning in the drawer; the URL settled on the lesson (not the course); reloading it sent
+      nothing (0 user messages).
+      **Bug found while verifying:** the strip wrote the COURSE route, so the URL described a different screen
+      than the one displayed — it only survived because `replaceState` does not re-route, and a refresh would
+      have landed on the course page.
+- [ ] **T-047** Sprint rest gate (PORT the mechanic, REDESIGN the visual). **Done when:** a gate token inside
+      the stream freezes the composer, suppresses the rest of that turn, runs a 5:00 client-side countdown
+      with no backend state, and unfreezes at zero.
+- [ ] **T-048** Passivity intercept as a real gate (REDESIGN — behaviour change). **Done when:** after the
+      tutor's `PASSIVITY` notify, a passive draft cannot be submitted, a real explanation can, and sending one
+      clears the intercept.
+- [ ] **T-049** Budapest mode as a structured `mode` on `POST /api/chat` (REDESIGN). **Done when:** with the
+      toggle on, the modifier reaches the server's outgoing prompt while the posted message does not.

@@ -9,7 +9,14 @@ import type { LearningData } from "../types.ts";
 import { memoryStrength } from "../memory.ts";
 import { MisconceptionTray } from "./MisconceptionTray.tsx";
 
-export function TelemetryRail({ learning }: { learning: LearningData | null }) {
+export function TelemetryRail({
+  learning,
+  grillHref,
+}: {
+  learning: LearningData | null;
+  /** A concept name is a grill affordance, as it was in the original dashboard. */
+  grillHref?: (concept: string) => string;
+}) {
   const memory = memoryStrength(learning);
   const concepts = learning?.schema.concepts ?? [];
 
@@ -45,7 +52,15 @@ export function TelemetryRail({ learning }: { learning: LearningData | null }) {
           <tbody>
             {concepts.map((c) => (
               <tr key={c.name}>
-                <td>{c.name}</td>
+                <td>
+                  {grillHref ? (
+                    <a className="concept-grill" href={grillHref(c.name)} title="grill this concept">
+                      {c.name}
+                    </a>
+                  ) : (
+                    c.name
+                  )}
+                </td>
                 <td className="num">{c.sm2.last_tested}</td>
                 <td className="num" style={c.due === "due" ? { color: "var(--warning-strong)" } : undefined}>
                   {c.sm2.next_review}
@@ -60,7 +75,10 @@ export function TelemetryRail({ learning }: { learning: LearningData | null }) {
         </table>
       )}
 
-      <MisconceptionTray misconceptions={learning?.schema.misconceptions ?? []} />
+      <MisconceptionTray
+        misconceptions={learning?.schema.misconceptions ?? []}
+        grillHref={grillHref}
+      />
     </section>
   );
 }

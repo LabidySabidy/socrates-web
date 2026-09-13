@@ -601,3 +601,15 @@ a.mod:hover { text-decoration: none; }
 .quiz-selfcheck { color: var(--ink-45); margin: 0 0 16px; max-width: 62ch; }
 .quiz-verdict { display: flex; align-items: center; gap: 10px; margin: 16px 0; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-sunk); }
 .quiz-verdict .eyebrow { margin-right: auto; }
+
+/* grill dispatch — the affordance that makes a click start a Socratic session */
+.tray-grill {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--action);
+  border-bottom: 1px solid transparent;
+}
+.tray-grill:hover { border-bottom-color: var(--action); text-decoration: none; }
+.concept-grill { color: inherit; border-bottom: 1px solid var(--rule); }
+.concept-grill:hover { color: var(--action); border-bottom-color: var(--action); text-decoration: none; }

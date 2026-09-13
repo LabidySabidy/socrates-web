@@ -54,6 +54,7 @@ export function App() {
         <LessonPage
           courseId={route.courseId}
           unitNumber={route.unit}
+          ask={route.ask}
           onExit={() => {
             // Back to the originating unit: the route carries it, so position survives the trip.
             window.location.hash = hrefCourse(route.courseId, route.unit).slice(1);
