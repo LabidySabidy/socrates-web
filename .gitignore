@@ -14,3 +14,10 @@ Thumbs.db
 
 # Runtime logs (generated)
 server*.log
+
+# Personal memory (not shipped) — mirrors the pi-agent-harness rule
+PROGRESS.md
+LESSONS.md
+
+# Design handoff reference (not shipped; PLAN.md still references it locally)
+docs/handoff-shots/

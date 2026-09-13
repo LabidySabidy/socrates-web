@@ -161,7 +161,7 @@ Fixes the live defect and lays the event log everything else reads.
 - `docs/HANDOFF-ANALYSIS.md` — separation note, gap analysis, spike evidence.
 - `docs/handoff-shots/` — visual targets (home, course, lesson, quiz, lab, cockpit).
 - `DECISIONS.md` — 2026-09-13 entries for every decision above.
-- Handoff: `C:\Users\Kasim Alam\Downloads\Socrates-Web Unified Cockpit\design_handoff_socrates\`.
+- Handoff: `C:\Users\<user>\Downloads\Socrates-Web Unified Cockpit\design_handoff_socrates\`.
 
 ## Settled (formerly open questions)
 - Content model: derived default, `COURSE.md` override (see DECISIONS).

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   parseMission,
   parsePlan,
@@ -133,8 +136,15 @@ test("parseSchema preserves an empty 'corrected' column without shifting", () =>
   assert.equal(s.misconceptions[0].date, "2026-02-01");
 });
 
-test("parseLearning reads a real directory", () => {
-  const d = parseLearning("C:/Users/Kasim Alam/.pi/agent/learning-demo");
+test("parseLearning reads a real directory", (t) => {
+  // Path is built from the home dir rather than hardcoded: a machine-specific absolute
+  // path is both unportable and an unnecessary disclosure in a public repo.
+  const dir = join(homedir(), ".pi", "agent", "learning-demo");
+  if (!existsSync(dir)) {
+    t.skip("learning-demo fixture not present on this machine");
+    return;
+  }
+  const d = parseLearning(dir);
   assert.ok(d.present.includes("SCHEMA.md"));
   assert.equal(d.schema.concepts.length, 4);
   assert.equal(d.mission.destination, "read the React source and trace a render cycle without help");
