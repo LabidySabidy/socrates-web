@@ -1,6 +1,5 @@
 /**
  * assessments.test.ts — T-028: authored items, generated-and-validated items, and the citations a
- * `codebase` course requires.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

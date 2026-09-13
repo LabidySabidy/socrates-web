@@ -16,10 +16,9 @@ import {
   filterCourses,
   mostRecent,
   totalMasteryCounts,
-  uninitiatedCourses,
 } from "./select.ts";
 import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
-import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
+import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText } from "./turn.ts";
 import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.ts";
 import { completionView } from "./completion.ts";
 import { compile, sample } from "./expr.ts";
@@ -215,15 +214,10 @@ const course = (over: Partial<CourseRef>): CourseRef =>
     dir: "/c",
     label: "Label",
     title: "Title",
-    hidden: false,
-    order: null,
     concepts: 0,
     masteryCounts: {},
     sessions: { count: 0, lastAt: null },
-    initiated: true,
-    kind: "topic",
-    fromScan: true,
-    fromRegistry: false,
+    fromStore: true,
     ...over,
   }) as CourseRef;
 
@@ -309,21 +303,12 @@ test("every module type has a label and an icon glyph, including the four taxono
 // discovery is intentional: a course must be initiated
 // ---------------------------------------------------------------------------
 
-test("only initiated, unhidden courses reach the catalogue and its count", () => {
-  const courses = [
-    course({ id: "real", label: "Real" }),
-    course({ id: "bare", label: "Bare", initiated: false }),
-    course({ id: "hidden", label: "Hidden", hidden: true }),
-  ];
-
-  assert.deepEqual(catalogueCourses(courses).map((c) => c.id), ["real"]);
-  assert.deepEqual(uninitiatedCourses(courses).map((c) => c.id), ["bare"]);
-
-  assert.equal(
-    catalogueCourses(courses).length,
-    1,
-    "the count next to the course list is the catalogue count, not the scan count",
-  );
+test("every course in the store reaches the catalogue — there is nothing to filter", () => {
+  // The scan and the registry are gone, so hidden/initiated no longer exist: a course is in the
+  // catalogue because the learner started it, and its count is simply how many there are.
+  const courses = [course({ id: "a", label: "A" }), course({ id: "b", label: "B" })];
+  assert.deepEqual(catalogueCourses(courses).map((c) => c.id), ["a", "b"]);
+  assert.equal(catalogueCourses(courses).length, 2);
 });
 
 // ---------------------------------------------------------------------------
@@ -1171,4 +1156,21 @@ test("the grill and scaffold dispatches share one mechanism", () => {
   assert.equal(grill.startsWith("#/lesson/c/2?ask="), true);
   assert.equal(scaffoldHref("c").startsWith("#/lesson/c/1?ask="), true);
   assert.notEqual(parseAsk(grill), parseAsk(scaffoldHref("c")));
+});
+
+// ---------------------------------------------------------------------------
+// stream errors reach the learner as prose, never as a JSON literal
+// ---------------------------------------------------------------------------
+
+test("the [ERROR] wrapper is stripped so a learner never sees JSON", () => {
+  // Observed live: a tutor turn rendered `{"error":"pi process exited"}` in the error strip.
+  assert.equal(streamErrorText('[ERROR] {"error":"pi process exited"}'), "pi process exited");
+  assert.equal(streamErrorText('[ERROR]{"error":"pi process exited"}'), "pi process exited");
+});
+
+test("a non-JSON error frame is shown as it arrived, not swallowed", () => {
+  // A crashed process can emit anything; hiding it would remove the only clue.
+  assert.equal(streamErrorText("[ERROR] boom"), "boom");
+  assert.equal(streamErrorText('[ERROR] {"error": 42}'), '{"error": 42}');
+  assert.equal(streamErrorText("[ERROR]"), "the turn failed with no message");
 });

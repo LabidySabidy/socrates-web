@@ -1,144 +1,77 @@
 /**
- * ManageCourses — register a course by directory, and hide / unhide / unregister.
+ * ManageCourses — the course catalogue's control panel.
  *
- * The scan root is shown here so the catalogue count is always explainable: "9 courses" is only
- * meaningful next to "scanning F:/Development".
- *
- * Unregister edits the registry only; a course that also lives under the scan root reappears, so
- * the server answers with `stillDiscovered` and we say so instead of appearing to do nothing.
+ * There is one thing to do here now: name a subject and start a course. The directory field, the
+ * folder browser, the registry list and the "not initiated" list are gone with the discovery stack —
+ * a course is a subject, and the store owns where it lives.
  */
 import { useState } from "react";
-import { createCourseFromSubject, postCourse, startCourse } from "../api.ts";
+import { createCourseFromSubject } from "../api.ts";
 import { scaffoldHref } from "../grill.ts";
-import { FolderPicker } from "./FolderPicker.tsx";
 import type { CourseRef } from "../types.ts";
-import { uninitiatedCourses } from "../select.ts";
-
-export interface ManageResult {
-  kind: "ok" | "error";
-  message: string;
-}
 
 export function ManageCourses({
   courses,
-  root,
   onChanged,
 }: {
   courses: CourseRef[];
-  root: string | null;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [dir, setDir] = useState("");
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ManageResult | null>(null);
-  /** Which not-initiated course is being started, and the mission being written for it. */
-  const [starting, setStarting] = useState<string | null>(null);
-  const [destination, setDestination] = useState("");
-  const [artifact, setArtifact] = useState("");
-  const [picking, setPicking] = useState(false);
-  /** The articulate entry point: the learner names the subject, nothing is pointed at. */
   const [subject, setSubject] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const uninitiated = uninitiatedCourses(courses);
-
-  async function send(body: Parameters<typeof postCourse>[0], okMessage: string) {
+  function start() {
+    const clean = subject.trim();
+    if (!clean || busy) return;
     setBusy(true);
-    setResult(null);
-    try {
-      const res = await postCourse(body);
-      if (!res.ok) {
-        setResult({ kind: "error", message: res.error ?? "request rejected" });
+    setError(null);
+    void createCourseFromSubject(clean).then((res) => {
+      setBusy(false);
+      if (!res.ok || !res.id) {
+        setError(res.error ?? "could not start the course");
         return;
       }
-      setResult({
-        kind: "ok",
-        message: res.stillDiscovered ? `${okMessage} — ${res.hint ?? "still visible"}` : okMessage,
-      });
-      setDir("");
-      setLabel("");
+      setSubject("");
       onChanged();
-    } catch (err) {
-      setResult({ kind: "error", message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function initiate(id: string) {
-    if (!destination.trim()) return;
-    setBusy(true);
-    setResult(null);
-    try {
-      const res = await startCourse(id, {
-        destination: destination.trim(),
-        artifact: artifact.trim() || undefined,
-      });
-      if (!res.ok) {
-        setResult({ kind: "error", message: res.error ?? "could not start the course" });
-        return;
-      }
-      setResult({ kind: "ok", message: `Started. ${id} now has a mission and appears in the catalogue.` });
-      setStarting(null);
-      setDestination("");
-      setArtifact("");
-      onChanged();
-    } catch (err) {
-      setResult({ kind: "error", message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(false);
-    }
+      // Straight into the interview, with the prompt visible in the composer.
+      window.location.hash = scaffoldHref(res.id).slice(1);
+    });
   }
 
   return (
-    <section className="manage" aria-label="Manage courses">
+    <section className="manage" aria-label="Start a course">
       <div className="manage-head">
         <h2 className="eyebrow">Courses</h2>
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? "Done" : "Add or manage"}
+          {open ? "Done" : "Start a course"}
         </button>
       </div>
 
-      <p className="manage-root eyebrow" data-testid="scan-root">
-        Scanning {root ?? "(no scan root configured)"}
-      </p>
+      <p className="manage-root eyebrow">Courses live in your Socrates library, not in a project folder.</p>
 
       {open ? (
         <div className="manage-body">
-          {/* PRIMARY entry point. A subject in the learner's own words, then the tutor interviews
-              them — the scaffold skill is dispatched through the same ask mechanism as the grill. */}
           <form
             className="subject-form"
             onSubmit={(e) => {
               e.preventDefault();
-              const clean = subject.trim();
-              if (!clean) return;
-              setBusy(true);
-              setResult(null);
-              void createCourseFromSubject(clean).then((res) => {
-                setBusy(false);
-                if (!res.ok || !res.id) {
-                  setResult({ kind: "error", message: res.error ?? "could not start the course" });
-                  return;
-                }
-                onChanged();
-                // Straight into the interview, with the prompt visible in the composer.
-                window.location.hash = scaffoldHref(res.id).slice(1);
-              });
+              start();
             }}
           >
             <label>
-              <span className="eyebrow">Start a course — what is the subject?</span>
+              <span className="eyebrow">What is the subject?</span>
               <span className="dir-row">
                 <input
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                   placeholder="Supabase row-level security"
                   aria-label="Course subject"
+                  autoFocus
                 />
                 <button type="submit" className="primary" disabled={busy || !subject.trim()}>
-                  Start course
+                  {busy ? "Starting…" : "Start course"}
                 </button>
               </span>
             </label>
@@ -148,161 +81,27 @@ export function ManageCourses({
             </p>
           </form>
 
-          <form
-            className="add-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const trimmed = dir.trim();
-              if (!trimmed) return;
-              void send({ dir: trimmed, label: label.trim() || undefined }, "Registered");
-            }}
-          >
-            <label>
-              <span className="eyebrow">Directory</span>
-              <span className="dir-row">
-                <input
-                  value={dir}
-                  onChange={(e) => setDir(e.target.value)}
-                  placeholder="F:/Development/SomeProject"
-                  aria-label="Course directory"
-                />
-                <button type="button" onClick={() => setPicking(true)} aria-label="Browse for a folder">
-                  Browse…
-                </button>
-              </span>
-            </label>
-            <label>
-              <span className="eyebrow">Label (optional)</span>
-              <input
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="Shown instead of the mission destination"
-                aria-label="Course label"
-              />
-            </label>
-            <button type="submit" className="primary" disabled={busy}>
-              Add course
-            </button>
-          </form>
+          {error ? (
+            <p className="notice" role="status">
+              {error}
+            </p>
+          ) : null}
 
-          <ul className="manage-list">
-            {courses.map((c) => (
-              <li key={c.id}>
-                <span className="manage-name">{c.label}</span>
-                <span className="manage-src eyebrow">
-                  {c.fromRegistry ? "registry" : "scan"}
-                  {c.fromRegistry && c.fromScan ? " + scan" : ""}
-                </span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void send(
-                      { dir: c.dir, action: c.hidden ? "unhide" : "hide" },
-                      c.hidden ? "Unhidden" : "Hidden",
-                    )
-                  }
-                >
-                  {c.hidden ? "Unhide" : "Hide"}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void send({ dir: c.dir, action: "unregister" }, "Unregistered")}
-                >
-                  Unregister
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          {uninitiated.length > 0 ? (
-            <>
-              <h3 className="eyebrow manage-sub">
-                Not initiated (no MISSION.md) · {uninitiated.length}
-              </h3>
-              <p className="manage-hint">
-                These directories have a learning folder but no mission, so they are not courses and
-                do not appear in the catalogue or its count. A mission is what marks a course as
-                started — write one here and the course appears immediately.
-              </p>
-              <ul className="manage-list">
-                {uninitiated.map((c) => (
-                  <li key={c.id} className="manage-init">
-                    <span className="manage-name">{c.id}</span>
-                    <span className="manage-src eyebrow">not initiated (no MISSION.md)</span>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      aria-expanded={starting === c.id}
-                      onClick={() => {
-                        setStarting(starting === c.id ? null : c.id);
-                        setDestination("");
-                        setArtifact("");
-                      }}
-                    >
-                      {starting === c.id ? "Cancel" : "Start course"}
-                    </button>
-
-                    {starting === c.id ? (
-                      <form
-                        className="add-form start-form"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void initiate(c.id);
-                        }}
-                      >
-                        <label>
-                          <span className="eyebrow">I will be able to… (required)</span>
-                          <input
-                            value={destination}
-                            onChange={(e) => setDestination(e.target.value)}
-                            placeholder="build an admin approval flow enforced at the database layer"
-                            aria-label="Mission destination"
-                            autoFocus
-                          />
-                        </label>
-                        <label>
-                          <span className="eyebrow">Proof-of-skill artifact (optional)</span>
-                          <input
-                            value={artifact}
-                            onChange={(e) => setArtifact(e.target.value)}
-                            placeholder="a merged PR adding RLS + an RPC"
-                            aria-label="Proof-of-skill artifact"
-                          />
-                        </label>
-                        <button type="submit" className="primary" disabled={busy || !destination.trim()}>
-                          Write the mission
-                        </button>
-                        <p className="manage-hint">
-                          Writes <code>MISSION.md</code> in your own words. The scaffold skill can
-                          enrich the rest of the mission later.
-                        </p>
-                      </form>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </>
+          {courses.length > 0 ? (
+            <ul className="manage-list">
+              {courses.map((c) => (
+                <li key={c.id}>
+                  <span className="manage-name">{c.label}</span>
+                  <span className="manage-src eyebrow">
+                    {c.concepts === 0
+                      ? "not scaffolded yet"
+                      : `${c.concepts} concept${c.concepts === 1 ? "" : "s"}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
           ) : null}
         </div>
-      ) : null}
-
-      {result ? (
-        <p className={result.kind === "ok" ? "manage-ok" : "notice"} role="status">
-          {result.message}
-        </p>
-      ) : null}
-
-      {picking ? (
-        <FolderPicker
-          start={dir.trim() || null}
-          onPick={(path) => {
-            setDir(path);
-            setPicking(false);
-          }}
-          onClose={() => setPicking(false)}
-        />
       ) : null}
     </section>
   );

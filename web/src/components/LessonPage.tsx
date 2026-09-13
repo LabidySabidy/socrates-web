@@ -13,7 +13,7 @@ import { fetchCourse } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefLesson } from "../router.ts";
 
-import { emptyTurn, isSilent, reduceTurn, splitTurn, type TurnState } from "../turn.ts";
+import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { appendUser, settleAssistant, type ChatTurn } from "../transcript.ts";
 import {
   isPassiveText,
@@ -207,7 +207,7 @@ export function LessonPage({
         return;
       }
       if (raw.startsWith("[ERROR]")) {
-        setError(raw.slice(7).trim());
+        setError(streamErrorText(raw));
         es.close();
         if (streamRef.current === es) streamRef.current = null;
         setBusy(false);

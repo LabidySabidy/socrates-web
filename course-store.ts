@@ -51,6 +51,15 @@ export function slugifySubject(subject: string): string {
     .replace(/-+$/g, "");
 }
 
+/**
+ * The shape the API and the UI consume. One store means no scan and no registry, so this is just a
+ * course plus its derived numbers.
+ */
+export interface CourseRef extends StoredCourse {
+  label: string;
+  fromStore: true;
+}
+
 export interface StoredCourse {
   id: string;
   dir: string;
@@ -102,6 +111,17 @@ function sessionIndex(dir: string): { count: number; lastAt: string | null } {
   } catch {
     return { count: 0, lastAt: null };
   }
+}
+
+/** Every course, in the shape the API serves. */
+export function courseRefs(env: NodeJS.ProcessEnv = process.env): CourseRef[] {
+  return listCourses(env).map((c) => ({ ...c, label: c.title, fromStore: true as const }));
+}
+
+/** Look up a course by id. Takes the discovery shape, which is what every caller already has. */
+export function findCourse(list: { courses: CourseRef[] }, id: string): CourseRef | null {
+  const needle = id.toLowerCase();
+  return list.courses.find((c) => c.id.toLowerCase() === needle) ?? null;
 }
 
 export type CreateResult = { ok: true; id: string; dir: string } | { ok: false; error: string };

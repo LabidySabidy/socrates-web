@@ -1,5 +1,5 @@
 /** api.ts — the only place the client talks to the server. */
-import type { BrowseResult, CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
+import type { CourseRef, CourseTree, CoursesResponse, Journal, LearningData } from "./types.ts";
 import type { AssessmentsResponse } from "./assessment-types.ts";
 import type { InteractivesResponse } from "./interactives-types.ts";
 
@@ -23,27 +23,7 @@ export const fetchCourse = (id: string) => get<CourseTree>(`/api/courses/${encod
 export const fetchLearning = (id: string) =>
   get<LearningData>(`/api/courses/${encodeURIComponent(id)}/learning`);
 
-export interface RegisterResult {
-  ok: boolean;
-  error?: string;
-  stillDiscovered?: boolean;
-  hint?: string;
-  courses?: CourseRef[];
-}
 
-export async function postCourse(body: {
-  dir: string;
-  action?: "register" | "unregister" | "hide" | "unhide";
-  label?: string;
-  order?: number;
-}): Promise<RegisterResult> {
-  const res = await fetch("/api/courses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return (await res.json()) as RegisterResult;
-}
 
 /** Session history for a course. Content comes from the SESSIONS projection, not the raw log. */
 export const fetchJournal = (id: string) =>
@@ -144,31 +124,8 @@ export async function generateInteractives(id: string, unit: number): Promise<In
   return body;
 }
 
-export interface StartResult {
-  ok?: boolean;
-  error?: string;
-  courses?: CourseRef[];
-  started?: CourseRef | null;
-}
 
-/** Author MISSION.md from the user's own words — the marker that makes a directory a course. */
-export async function startCourse(
-  id: string,
-  mission: { destination: string; artifact?: string; drivingProject?: string },
-): Promise<StartResult> {
-  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/init`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(mission),
-  });
-  const body = (await res.json().catch(() => ({}))) as StartResult;
-  if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-  return body;
-}
 
-/** List sub-directories, or the drives when `path` is null. Server-side: see fs-browse.ts. */
-export const browseDirs = (path: string | null) =>
-  get<BrowseResult>(path === null ? "/api/fs" : `/api/fs?path=${encodeURIComponent(path)}`);
 
 export interface CreateCourseResult {
   ok?: boolean;

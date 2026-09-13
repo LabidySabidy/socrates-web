@@ -102,7 +102,7 @@ export function HomePage({
         <p className="notice">Discovery warnings: {data.warnings.join(", ")}</p>
       ) : null}
 
-      <ManageCourses courses={data.courses} root={data.root} onChanged={onChanged} />
+      <ManageCourses courses={data.courses} onChanged={onChanged} />
 
       {visible.length === 0 ? (
         <div className="empty-note">
@@ -152,9 +152,7 @@ export function HomePage({
                   <p className="desc">
                     {course.concepts === 0
                       ? "Started, but not scaffolded yet — the tutor writes the concept cards with you."
-                      : `${course.concepts} concept${course.concepts === 1 ? "" : "s"}${
-                          course.fromRegistry && !course.fromScan ? " · registered" : ""
-                        }`}
+                      : `${course.concepts} concept${course.concepts === 1 ? "" : "s"}`}
                   </p>
                   <div className="footer">
                     {course.concepts === 0

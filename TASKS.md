@@ -399,3 +399,28 @@
       the prompt the bridge was handed — 3 tests, including "any other mode value is treated as the default".
       **Wording deliberately unchanged:** it is programming-specific, and rewriting it would be a content
       decision rather than a recovery.
+
+## T-051 — the settle frame can be lost, freezing a tutor turn
+
+**Status:** open, reproduced twice on 2026-09-13.
+
+**Symptom.** A real tutor turn renders its prose, then stops. The composer stays disabled forever,
+no further tokens arrive for that page even when a later turn is accepted, and reloading does not
+recover it.
+
+**Evidence.**
+- Client: `document.querySelector(".composer button").disabled === true`, transcript prose frozen at
+  1508 characters for 2+ minutes.
+- Server, at the same moment: `POST /api/chat` → `{"accepted":true,"killedTurn":false}`, i.e. the
+  server considers the previous turn settled. So the loss is in the handshake, not the turn.
+- Triggered by the articulate flow (Start a course → the seeded `/skill:scaffold-learning` turn), and
+  by a tool-heavy turn; a simple Q&A turn in the same course released normally.
+
+**Suspected mechanism.** `/api/stream` is single-subscriber: it answers 429 when `activeStream` is
+already set, and only writes `[DONE]` when it is the subscriber that sees the settle. An orphaned
+EventSource therefore either takes the settle frame that belonged to the visible turn or blocks the
+live one at 429, and `EventSource`'s silent auto-retry turns that into an indefinite wait.
+
+**Fix direction.** Instrument `/api/stream` (log subscribe/replay/settle and the 429 branch) to see
+which of the two branches fires, then decide: make the stream re-attachable per turn, or have the
+client treat a stale stream as a lost turn rather than an open one.

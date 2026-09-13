@@ -89,8 +89,8 @@ export interface CourseRef {
   dir: string;
   label: string;
   title: string;
-  hidden: boolean;
-  order: number | null;
+  /** Always true now: a course exists because it is in the store. */
+  fromStore: boolean;
   concepts: number;
   /** Per-state counts over the course's unique concept cards, for the catalogue metrics. */
   masteryCounts: Record<MasteryState, number>;
@@ -98,8 +98,6 @@ export interface CourseRef {
   sessions: { count: number; lastAt: string | null };
   /** A course must have been INITIATED: `.agent/learning/MISSION.md` exists. */
   initiated: boolean;
-  fromScan: boolean;
-  fromRegistry: boolean;
 }
 
 export interface CoursesResponse {

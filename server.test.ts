@@ -1,13 +1,15 @@
 /**
- * server.test.ts — T-014: the multi-course API surface, plus the byte-compatibility
- * guarantee on the legacy /api/learning alias.
+ * server.test.ts — the API surface, exercised against a real store.
  *
- * Boots the real router on an ephemeral port against vendored fixtures. `chat: false`
- * because the chat routes spawn pi and are covered separately by bridge.test.ts.
+ * There is no scan any more: a course IS a directory in the store. The vendored fixtures are copied
+ * into a temp store once for the suite, so every test drives the same code path a learner's machine
+ * would, and none of it touches the real `~/.socrates/courses`.
+ *
+ * `chat: false` by default because those routes spawn pi and are covered by bridge.test.ts.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, type RunningServer } from "./server.ts";
@@ -22,7 +24,13 @@ const FIXTURES = join(import.meta.dirname, "test", "fixtures");
 const STORE = mkdtempSync(join(tmpdir(), "socrates-test-store-"));
 process.env.SOCRATES_HOME = STORE;
 test.after?.(() => rmSync(STORE, { recursive: true, force: true }));
-const BASIC = join(FIXTURES, "course-basic");
+
+// Every fixture becomes a course in the store. Copying rather than pointing at them also means tests
+// that write into a course (an event log, an assessment cache) never touch the vendored originals.
+for (const entry of readdirSync(FIXTURES, { withFileTypes: true })) {
+  if (entry.isDirectory()) cpSync(join(FIXTURES, entry.name), join(STORE, entry.name), { recursive: true });
+}
+const BASIC = join(STORE, "course-basic");
 
 async function boot(t: { after(fn: () => Promise<void> | void): void }): Promise<{ base: string; running: RunningServer }> {
   // A throwaway static root keeps the tests independent of `web/dist` existing.
@@ -30,16 +38,13 @@ async function boot(t: { after(fn: () => Promise<void> | void): void }): Promise
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
-    projectDir: BASIC,
-    coursesRoot: FIXTURES,
-    registryPath: join(BASIC, ".agent", "courses.json"),
+    store: STORE,
     staticDir,
     chat: false,
     watch: false,
   });
   t.after(async () => {
     await running.close();
-    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
     rmSync(staticDir, { recursive: true, force: true });
   });
   return { base: `http://127.0.0.1:${running.port}`, running };
@@ -66,7 +71,7 @@ function walk(dir: string): string[] {
 
 test("booting the server does not spawn pi and never writes into the course", async (t) => {
   // Regression guard. The bridge used to be wired at boot, which spawned a real agent with
-  // cwd = PROJECT_DIR; the global learning + telemetry extensions then wrote an event log
+  // cwd = the course directory; the global learning + telemetry extensions then wrote an event log
   // containing absolute paths straight into the course directory. Booting is now inert:
   // the bridge is wired on the first chat request only.
   const before = walk(BASIC);
@@ -74,72 +79,19 @@ test("booting the server does not spawn pi and never writes into the course", as
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
-    projectDir: BASIC,
-    coursesRoot: FIXTURES,
-    registryPath: join(BASIC, ".agent", "courses.json"),
+    store: STORE,
     staticDir,
     chat: true, // chat available — just not started
     watch: false,
   });
   t.after(async () => {
     await running.close();
-    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
     rmSync(staticDir, { recursive: true, force: true });
   });
 
   await new Promise((r) => setTimeout(r, 500)); // give an unwanted spawn time to write
   assert.deepEqual(walk(BASIC), before, "booting must not touch the course directory");
   assert.ok(!before.some((f) => f.includes("events.jsonl") || f.includes("telemetry") || f.includes("SESSIONS")));
-});
-
-test("GET /api/courses lists discovered courses with their metadata", async (t) => {
-  const { base } = await boot(t);
-  const { status, body } = await getJson(`${base}/api/courses`);
-
-  assert.equal(status, 200);
-  assert.deepEqual(body.warnings, []);
-  assert.equal(body.root, FIXTURES);
-
-  const ids = body.courses.map((c: { id: string }) => c.id);
-  for (const expected of [
-    "course-basic",
-    "course-empty-concepts",
-    "course-no-schema",
-    "course-manifest",
-  ]) {
-    assert.ok(ids.includes(expected), `expected ${expected} in ${ids.join()}`);
-  }
-
-  const basic = body.courses.find((c: { id: string }) => c.id === "course-basic");
-  assert.equal(basic.concepts, 3);
-  assert.equal(basic.label, "derive a course tree from learning markdown without inventing data");
-  assert.equal(basic.hidden, false);
-  assert.equal(basic.fromScan, true);
-  assert.equal(basic.fromRegistry, false);
-
-});
-
-test("discovery marks a learning folder without MISSION.md as not initiated", async (t) => {
-  const { base } = await boot(t);
-  const { body } = await getJson(`${base}/api/courses`);
-
-  const bare = body.courses.find((c: { id: string }) => c.id === "course-no-mission");
-  assert.equal(bare.initiated, false, "no MISSION.md means the user never started it");
-  assert.ok(bare.dir, "it is still reported so the UI can explain why it is hidden");
-
-  const real = body.courses.find((c: { id: string }) => c.id === "course-basic");
-  assert.equal(real.initiated, true);
-  // every other fixture carries a mission
-  const uninitiated = body.courses.filter((c: { initiated: boolean }) => !c.initiated);
-  assert.deepEqual(uninitiated.map((c: { id: string }) => c.id), ["course-no-mission"]);
-});
-
-test("a not-initiated course is still loadable — only discovery excludes it", async (t) => {
-  const { base } = await boot(t);
-  const { status, body } = await getJson(`${base}/api/courses/course-no-mission`);
-  assert.equal(status, 200);
-  assert.ok(body.warnings.includes("no-mission"), "the derivation stays graceful");
-  assert.equal(body.units.length, 1);
 });
 
 test("GET /api/courses/:id returns the derived tree", async (t) => {
@@ -215,99 +167,6 @@ test("a course with no concepts still returns a usable tree, not an error", asyn
   assert.ok(body.warnings.includes("no-concepts"));
 });
 
-test("POST /api/courses registers, hides, and unregisters — touching only the registry", async (t) => {
-  const { base } = await boot(t);
-  const outside = mkdtempSync(join(tmpdir(), "soc-outside-"));
-  t.after(() => rmSync(outside, { recursive: true, force: true }));
-  mkdirSync(join(outside, "Outside", ".agent", "learning"), { recursive: true });
-  writeFileSync(
-    join(outside, "Outside", ".agent", "learning", "MISSION.md"),
-    "# M\n\n- **I will be able to:** live outside the scan root\n",
-  );
-  const outsideDir = join(outside, "Outside");
-
-  const post = async (payload: unknown) => {
-    const res = await fetch(`${base}/api/courses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return { status: res.status, body: await res.json() };
-  };
-
-  const registered = await post({ dir: outsideDir, label: "Outside (labelled)", order: 0 });
-  assert.equal(registered.status, 200);
-  assert.equal(registered.body.ok, true);
-  const added = registered.body.courses.find((c: { id: string }) => c.id === "Outside");
-  assert.equal(added.label, "Outside (labelled)");
-  assert.equal(added.fromScan, false);
-  assert.equal(added.fromRegistry, true);
-  assert.equal(registered.body.courses[0].id, "Outside", "order 0 pins it first");
-
-  const hidden = await post({ dir: outsideDir, action: "hide" });
-  assert.equal(hidden.body.courses.find((c: { id: string }) => c.id === "Outside").hidden, true);
-
-  const unhidden = await post({ dir: outsideDir, action: "unhide" });
-  assert.equal(unhidden.body.courses.find((c: { id: string }) => c.id === "Outside").hidden, false);
-
-  const unregistered = await post({ dir: outsideDir, action: "unregister" });
-  assert.equal(unregistered.body.ok, true);
-  assert.ok(!unregistered.body.courses.some((c: { id: string }) => c.id === "Outside"));
-  assert.equal(unregistered.body.stillDiscovered, undefined, "outside the scan root, so it is really gone");
-
-  // disk is untouched: unregister only edits the registry
-  assert.ok(readFileSync(join(outsideDir, ".agent", "learning", "MISSION.md"), "utf8").length > 0);
-});
-
-test("unregistering a scanned course says it is still discoverable, and hide is the real removal", async (t) => {
-  const { base } = await boot(t);
-  const post = async (payload: unknown) => {
-    const res = await fetch(`${base}/api/courses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return { status: res.status, body: await res.json() };
-  };
-
-  const dir = join(FIXTURES, "course-no-mission");
-  await post({ dir }); // register it first so there is something to remove
-  const removed = await post({ dir, action: "unregister" });
-  assert.equal(removed.body.stillDiscovered, true, "the scan re-finds a course under COURSES_ROOT");
-  assert.match(removed.body.hint, /hide/);
-
-  const hidden = await post({ dir, action: "hide" });
-  // discover() returns hidden courses too, flagged — the UI needs them to offer "unhide".
-  assert.equal(hidden.body.courses.find((c: { id: string }) => c.id === "course-no-mission").hidden, true);
-  await post({ dir, action: "unhide" });
-  const back = await post({ dir, action: "unhide" });
-  assert.equal(back.body.courses.find((c: { id: string }) => c.id === "course-no-mission").hidden, false);
-});
-
-test("POST /api/courses rejects a non-course, a missing dir, and an unknown action", async (t) => {
-  const { base } = await boot(t);
-  const post = async (payload: unknown) => {
-    const res = await fetch(`${base}/api/courses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return { status: res.status, body: await res.json() };
-  };
-
-  const missing = await post({});
-  assert.equal(missing.status, 400);
-  assert.match(missing.body.error, /dir or subject required/);
-
-  const notACourse = await post({ dir: mkdtempSync(join(tmpdir(), "soc-plain-")) });
-  assert.equal(notACourse.status, 400);
-  assert.match(notACourse.body.error, /not a course directory/);
-
-  const badAction = await post({ dir: BASIC, action: "explode" });
-  assert.equal(badAction.status, 400);
-  assert.match(badAction.body.error, /unknown action/);
-});
-
 test("GET /api/courses/:id/journal returns session history newest-first", async (t) => {
   const { base } = await boot(t);
   const { status, body } = await getJson(`${base}/api/courses/course-with-journal/journal`);
@@ -351,16 +210,6 @@ test("the journal file route refuses traversal and unknown names", async (t) => 
   }
 });
 
-test("the catalogue reports session recency from file names alone", async (t) => {
-  const { base } = await boot(t);
-  const { body } = await getJson(`${base}/api/courses`);
-  const journalCourse = body.courses.find((c: { id: string }) => c.id === "course-with-journal");
-  assert.deepEqual(journalCourse.sessions, { count: 2, lastAt: "2026-09-10T07:41:00.000Z" });
-
-  const plain = body.courses.find((c: { id: string }) => c.id === "course-basic");
-  assert.deepEqual(plain.sessions, { count: 0, lastAt: null });
-});
-
 test("chat routes are absent when chat is disabled, and health still answers", async (t) => {
   const { base } = await boot(t);
   const chat = await fetch(`${base}/api/chat`, {
@@ -390,16 +239,13 @@ async function bootChat(t: { after(fn: () => Promise<void> | void): void }) {
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
   const running = await startServer({
     port: 0,
-    projectDir: BASIC,
-    coursesRoot: FIXTURES,
-    registryPath: join(BASIC, ".agent", "courses.json"),
+    store: STORE,
     staticDir,
     chat: true,
     watch: false,
   });
   t.after(async () => {
     await running.close();
-    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
     rmSync(staticDir, { recursive: true, force: true });
   });
   return { base: `http://127.0.0.1:${running.port}` };
@@ -441,16 +287,13 @@ async function bootChatRecording(t: { after(fn: () => Promise<void> | void): voi
   process.env.PI_ARGS = script;
   const running = await startServer({
     port: 0,
-    projectDir: BASIC,
-    coursesRoot: FIXTURES,
-    registryPath: join(BASIC, ".agent", "courses.json"),
+    store: STORE,
     staticDir,
     chat: true,
     watch: false,
   });
   t.after(async () => {
     await running.close();
-    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
     rmSync(staticDir, { recursive: true, force: true });
   });
 
@@ -479,25 +322,6 @@ async function readStream(url: string): Promise<{ status: number; lines: string[
       .map((l) => l.slice(6)),
   };
 }
-
-test("a prompt without a course keeps the default-course behaviour", async (t) => {
-  const { base } = await bootChat(t);
-  const res = await fetch(`${base}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "where am I" }),
-  });
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.accepted, true);
-  assert.equal(body.course, "course-basic");
-  assert.equal(body.switched, false, "already in the default course");
-
-  const { lines } = await readStream(`${base}/api/stream`);
-  const delta = lines.find((l) => l.includes("cwd:"));
-  assert.ok(delta, "a turn streamed back");
-  assert.match(JSON.parse(delta!).assistantMessageEvent.delta, /course-basic$/);
-});
 
 test("naming another course restarts the agent in that course and the turn reaches it", async (t) => {
   const { base } = await bootChat(t);
@@ -538,7 +362,7 @@ test("a stream cannot subscribe to a different course than the active turn", asy
   await readStream(`${base}/api/stream?course=course-basic`);
 });
 
-test("a prompt for an unknown or uninitiated course is refused", async (t) => {
+test("a prompt for an unknown course, or none at all, is refused", async (t) => {
   const { base } = await bootChat(t);
   const post = async (course: string) => {
     const res = await fetch(`${base}/api/chat`, {
@@ -553,9 +377,13 @@ test("a prompt for an unknown or uninitiated course is refused", async (t) => {
   assert.equal(unknown.status, 404);
   assert.ok(Array.isArray(unknown.body.known));
 
-  const uninitiated = await post("course-no-mission");
-  assert.equal(uninitiated.status, 409);
-  assert.match(uninitiated.body.error, /not initiated/);
+  const none = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "hi" }),
+  });
+  assert.equal(none.status, 400, "a course is required: there is no default course any more");
+  assert.match((await none.json()).error, /course required/);
 });
 
 // ---------------------------------------------------------------------------
@@ -800,7 +628,7 @@ test("budapest ships as a mode: the server injects it, the message stays clean",
   const res = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "what is state?", mode: "budapest" }),
+    body: JSON.stringify({ message: "what is state?", course: "course-basic", mode: "budapest" }),
   });
   const body = await res.json();
   assert.equal(body.mode, "budapest");
@@ -817,7 +645,7 @@ test("without the mode the prompt is exactly the message", async (t) => {
   await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "what is state?" }),
+    body: JSON.stringify({ message: "what is state?", course: "course-basic" }),
   });
   assert.equal(await sent(), "what is state?", "no modifier, no pollution");
 });
@@ -827,7 +655,7 @@ test("any other mode value is treated as the default", async (t) => {
   const res = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "hi", mode: "whatever" }),
+    body: JSON.stringify({ message: "hi", course: "course-basic", mode: "whatever" }),
   });
   assert.equal((await res.json()).mode, "default");
   assert.equal(await sent(), "hi");
@@ -836,51 +664,6 @@ test("any other mode value is treated as the default", async (t) => {
 // ---------------------------------------------------------------------------
 // folder browser — pick a directory instead of typing one
 // ---------------------------------------------------------------------------
-
-test("GET /api/fs with no path offers the drives", async (t) => {
-  const { base } = await boot(t);
-  const { status, body } = await getJson(`${base}/api/fs`);
-  assert.equal(status, 200);
-  assert.equal(body.path, null, "no directory is being listed yet");
-  assert.ok(body.entries.length >= 1, "at least one drive");
-  // No backslash literal: a Windows root is a drive letter, a colon, then a separator.
-  assert.ok(
-    body.entries.every((e: { path: string }) => e.path === "/" || /^[A-Z]:/.test(e.path)),
-    `every entry should be a root: ${JSON.stringify(body.entries.map((e: { path: string }) => e.path))}`,
-  );
-});
-
-test("GET /api/fs lists sub-directories and flags which are courses", async (t) => {
-  const { base } = await boot(t);
-  const { status, body } = await getJson(`${base}/api/fs?path=${encodeURIComponent(FIXTURES)}`);
-
-  assert.equal(status, 200);
-  assert.ok(body.path.endsWith("fixtures"), `listing should be rooted at the fixtures: ${body.path}`);
-  assert.ok(body.parent, "it can walk up");
-
-  const byName = Object.fromEntries(body.entries.map((e: { name: string }) => [e.name, e]));
-  assert.equal(byName["course-basic"].isCourse, true);
-  assert.equal(byName["course-basic"].initiated, true, "it has a MISSION.md");
-  assert.equal(byName["course-no-mission"].initiated, false, "learning dir, no mission");
-
-  // Courses sort first, and nothing that is not a directory appears.
-  const names = body.entries.map((e: { name: string }) => e.name);
-  assert.equal(byName[names[0]].isCourse, true, "a course leads the list");
-  assert.equal(names.includes("course-basic"), true);
-});
-
-test("a file path is refused as a directory, and a missing one says so", async (t) => {
-  const { base } = await boot(t);
-  const file = join(FIXTURES, "course-basic", ".agent", "learning", "MISSION.md");
-
-  const asDir = await getJson(`${base}/api/fs?path=${encodeURIComponent(file)}`);
-  assert.equal(asDir.status, 404);
-  assert.match(asDir.body.error, /not a directory/);
-
-  const missing = await getJson(`${base}/api/fs?path=${encodeURIComponent(join(FIXTURES, "nope"))}`);
-  assert.equal(missing.status, 404);
-  assert.match(missing.body.error, /no such directory/);
-});
 
 // ---------------------------------------------------------------------------
 // the articulate entry point — a subject, not a directory
@@ -965,9 +748,7 @@ test("the server binds an ephemeral port when asked for 0", async (t) => {
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>\n");
   const running = await startServer({
     port: 0,
-    projectDir: BASIC,
-    coursesRoot: FIXTURES,
-    registryPath: join(BASIC, ".agent", "courses.json"),
+    store: STORE,
     staticDir,
     chat: false,
     watch: false,

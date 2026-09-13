@@ -4,18 +4,11 @@
 import type { CourseRef } from "./types.ts";
 
 /**
- * What the catalogue grid and its count show: courses the user actually initiated, minus hidden.
- *
- * A directory is only a course if it has MISSION.md — the learning extension creates
- * `.agent/learning/` wherever a session has run, so "has a learning dir" is not intent.
+ * What the catalogue grid and its count show. Every course in the store is one the learner started,
+ * so there is nothing to filter out.
  */
 export function catalogueCourses(courses: CourseRef[]): CourseRef[] {
-  return courses.filter((c) => c.initiated && !c.hidden);
-}
-
-/** Directories with a learning folder but no mission: surfaced under "Add or manage". */
-export function uninitiatedCourses(courses: CourseRef[]): CourseRef[] {
-  return courses.filter((c) => !c.initiated);
+  return courses;
 }
 
 /**

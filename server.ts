@@ -12,7 +12,7 @@
  *   GET  /api/stream                 SSE: agent output + {type:"reload"} on schema change
  *   GET  /health
  *
- * Env: PROJECT_DIR (default course), COURSES_ROOT (scan root), PORT (default 3850).
+ * Env: SOCRATES_HOME (course store), HOST, PORT (default 3850).
  *
  * `startServer()` is exported so tests can boot the real router on an ephemeral port;
  * importing this module no longer has side effects.
@@ -24,22 +24,9 @@ import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
-import {
-  discoverCourses,
-  findCourse,
-  defaultCoursesRoot,
-  registerCourse,
-  setHidden,
-  startCourse,
-  unregisterCourse,
-  REGISTRY_VERSION,
-  type CourseRef,
-  type DiscoveryResult,
-} from "./courses.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
-import { browse } from "./fs-browse.ts";
-import { createCourse, listCourses, storeRoot } from "./course-store.ts";
+import { courseRefs, createCourse, findCourse, storeRoot, type CourseRef } from "./course-store.ts";
 import {
   awardedBadge,
   badgeState,
@@ -77,10 +64,8 @@ export interface ServerOptions {
   /** Interface to bind. Defaults to loopback. */
   host?: string;
   port?: number;
-  /** The default course. Also the fallback scan doesn't apply if COURSES_ROOT is set. */
-  projectDir?: string;
-  coursesRoot?: string | null;
-  registryPath?: string;
+  /** The course store. Defaults to ~/.socrates/courses, or SOCRATES_HOME. */
+  store?: string;
   publicDir?: string;
   /** Static root. Defaults to web/dist — the old vanilla UI in public/ was retired in P2. */
   staticDir?: string;
@@ -164,12 +149,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
    * put that listing on the network. Set HOST=0.0.0.0 deliberately to expose it.
    */
   const host = opts.host ?? process.env.HOST ?? "127.0.0.1";
-  const projectDir = opts.projectDir ?? process.env.PROJECT_DIR ?? process.cwd();
-  const coursesRoot =
-    opts.coursesRoot !== undefined
-      ? opts.coursesRoot
-      : process.env.COURSES_ROOT ?? defaultCoursesRoot(projectDir);
-  const registryPath = opts.registryPath ?? join(projectDir, ".agent", "courses.json");
+  const store = opts.store ?? storeRoot();
   const publicDir =
     opts.staticDir ??
     opts.publicDir ??
@@ -188,34 +168,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
   };
 
-  /**
-   * The course list: the STORE first, then anything the scan still finds. The scan is on its way out
-   * (see PLAN.md P16) and is listed second so a store course always wins an id collision.
-   */
-  const discover = (): DiscoveryResult => {
-    const scanned = discoverCourses({ root: coursesRoot, projectDir, registryPath });
-    const stored: CourseRef[] = listCourses().map((c) => ({
-      id: c.id,
-      dir: c.dir,
-      label: c.title,
-      title: c.title,
-      hidden: false,
-      order: null,
-      concepts: c.concepts,
-      masteryCounts: c.masteryCounts,
-      sessions: c.sessions,
-      initiated: true,
-      kind: "topic",
-      fromScan: false,
-      fromRegistry: false,
-      fromStore: true,
-    }));
-    const storedIds = new Set(stored.map((c) => c.id.toLowerCase()));
-    return {
-      ...scanned,
-      courses: [...stored, ...scanned.courses.filter((c) => !storedIds.has(c.id.toLowerCase()))],
-    };
-  };
+  /** The course list: the store, and nothing else. */
+  const discover = (): { courses: CourseRef[]; root: string | null; warnings: string[] } => ({
+    courses: courseRefs(),
+    root: store,
+    warnings: [],
+  });
 
   // --- chat / SSE state ------------------------------------------------------
   let turnLines: string[] = [];
@@ -229,8 +187,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
    * occupy that slot, and must not be starved of updates because a turn is open elsewhere.
    */
   const watchStreams = new Set<ServerResponse>();
-  const bridge = new ProcessBridge(projectDir);
-  const defaultCourseId = () => basename(resolve(projectDir));
+  const bridge = new ProcessBridge(store);
 
   function finalize(kind: "done" | "error", detail?: unknown): void {
     settled = true;
@@ -252,7 +209,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
 
   // The bridge is wired on the FIRST chat request, not at boot. Registering a line handler
   // spawns pi, and a server boot must never spawn a ~1GB agent with cwd set to whatever
-  // PROJECT_DIR points at — that is how an event log full of absolute paths ends up written
+  // the store root — that is how an event log full of absolute paths ends up written
   // into an arbitrary directory. Still registered exactly once, so no listeners accumulate.
   let bridgeWired = false;
   function ensureBridgeWired(): void {
@@ -359,7 +316,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         /* ignore unwatchable dirs */
       }
     }
-    console.log(`[watcher] watching ${watchers.length} course(s) under ${coursesRoot ?? "(none)"}`);
+    console.log(`[watcher] watching ${watchers.length} course(s) in ${store}`);
   }
 
   // --- one-shot turns (generation) --------------------------------------------
@@ -436,7 +393,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
   }
 
-  const server = createServer(async (req, res) => {
+  /**
+   * Every route lives in here. A throw anywhere in it used to leave the request open forever — the
+   * socket stayed connected and the client waited, which is far worse than a 500 because it looks
+   * like a slow server rather than a bug. Any exception is now answered.
+   */
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = (req.url || "/").split("?")[0];
 
     // --- courses -------------------------------------------------------------
@@ -444,7 +406,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       const result = discover();
       sendJson(res, 200, {
         root: result.root,
-        registry: registryPath,
         warnings: result.warnings,
         courses: result.courses,
       });
@@ -474,46 +435,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           return;
         }
 
-        if (typeof body.dir !== "string" || !body.dir.trim()) {
-          sendJson(res, 400, { error: "dir or subject required" });
-          return;
-        }
-
-        const action = typeof body.action === "string" ? body.action : "register";
-        let result: { ok: boolean; error?: string };
-        if (action === "register") {
-          result = registerCourse(registryPath, body.dir, {
-            label: typeof body.label === "string" ? body.label : undefined,
-            order: typeof body.order === "number" ? body.order : undefined,
-          });
-        } else if (action === "unregister") {
-          result = unregisterCourse(registryPath, body.dir);
-        } else if (action === "hide" || action === "unhide") {
-          result = setHidden(registryPath, body.dir, action === "hide");
-        } else {
-          sendJson(res, 400, { error: `unknown action: ${action}` });
-          return;
-        }
-        if (!result.ok) {
-          sendJson(res, 400, { error: result.error });
-          return;
-        }
-        resyncWatchers();
-        const after = discover();
-        // `unregister` removes the registry entry; the scan can still find the course if it lives
-        // under COURSES_ROOT. Say so rather than leaving the client to wonder why it is still listed.
-        // "Remove it from the catalogue" is `hide` — the reversible one.
-        const stillDiscovered =
-          action === "unregister"
-            ? after.courses.some((c) => resolve(c.dir) === resolve(String(body.dir)))
-            : undefined;
-        sendJson(res, 200, {
-          ok: true,
-          action,
-          ...(stillDiscovered ? { stillDiscovered, hint: "use action 'hide' to remove it from the catalogue" } : {}),
-          warnings: after.warnings,
-          courses: after.courses,
-        });
+        sendJson(res, 400, { error: "subject required" });
       } catch (err) {
         sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid body" });
       }
@@ -819,51 +741,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
     }
 
-    // --- folder browser: pick a course directory instead of typing a path -----
-    if (url === "/api/fs") {
-      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
-      const asked = query.get("path");
-      try {
-        sendJson(res, 200, browse(asked === null || asked === "" ? null : asked));
-      } catch (err) {
-        sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    // --- start a course: author the mission, the marker of intent -------------
-    const initMatch = /^\/api\/courses\/([^/]+)\/init$/.exec(url);
-    if (initMatch && req.method === "POST") {
-      const result = discover();
-      const ref = findCourse(result, decodeURIComponent(initMatch[1]));
-      if (!ref) {
-        sendJson(res, 404, { error: `unknown course: ${initMatch[1]}` });
-        return;
-      }
-      try {
-        const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
-        const started = startCourse(ref.dir, {
-          destination: typeof body.destination === "string" ? body.destination : "",
-          artifact: typeof body.artifact === "string" ? body.artifact : undefined,
-          drivingProject: typeof body.drivingProject === "string" ? body.drivingProject : undefined,
-        });
-        if (!started.ok) {
-          sendJson(res, started.error?.startsWith("already") ? 409 : 400, { error: started.error });
-          return;
-        }
-        resyncWatchers();
-        const after = discover();
-        sendJson(res, 200, {
-          ok: true,
-          courses: after.courses,
-          started: after.courses.find((c) => c.id === ref.id) ?? null,
-        });
-      } catch (err) {
-        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
     // --- quiz results: recorded as history, never as a mastery claim -----------
     const resultsMatch = /^\/api\/courses\/([^/]+)\/results$/.exec(url);
     if (resultsMatch && req.method === "POST") {
@@ -980,23 +857,17 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           return;
         }
 
-        // The course decides which directory the tutor runs in, and cwd IS which course it can
-        // read and write. Omitting it keeps the pre-course behaviour: the default course.
+        // The course decides which directory the tutor runs in, and cwd IS which course it can read
+        // and write. It is REQUIRED: with one store there is no default course to fall back to.
         const result = discover();
         const wanted = typeof parsed.course === "string" && parsed.course ? parsed.course : null;
-        const ref = wanted ? findCourse(result, wanted) : findCourse(result, defaultCourseId());
-        if (!ref) {
-          sendJson(res, 404, {
-            error: `unknown course: ${wanted ?? defaultCourseId()}`,
-            known: result.courses.map((c) => c.id),
-          });
+        if (!wanted) {
+          sendJson(res, 400, { error: "course required", known: result.courses.map((c) => c.id) });
           return;
         }
-        if (!ref.initiated) {
-          sendJson(res, 409, {
-            error: `not initiated (no MISSION.md): ${ref.id}`,
-            hint: "a course must have a mission before a tutor session can run in it",
-          });
+        const ref = findCourse(result, wanted);
+        if (!ref) {
+          sendJson(res, 404, { error: `unknown course: ${wanted}`, known: result.courses.map((c) => c.id) });
           return;
         }
 
@@ -1083,6 +954,23 @@ ${BUDAPEST_MODIFIER}` : message;
     if (await serveStatic(url, res)) return;
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
+  }
+
+  const server = createServer((req, res) => {
+    handleRequest(req, res).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[server] unhandled error for ${req.method} ${req.url}:`, message);
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, JSON_HEADERS);
+          res.end(JSON.stringify({ error: message }));
+        } else {
+          res.end();
+        }
+      } catch {
+        /* the socket is already gone */
+      }
+    });
   });
 
   resyncWatchers();
@@ -1092,9 +980,7 @@ ${BUDAPEST_MODIFIER}` : message;
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : port;
       console.log(`socrates-web: http://localhost:${actualPort}`);
-      console.log(`default course: ${projectDir}`);
-      console.log(`courses root:   ${coursesRoot ?? "(none)"}`);
-      console.log(`course store:   ${storeRoot()}`);
+      console.log(`course store:   ${store}`);
       console.log(`listening on:   ${host}:${actualPort}`);
       resolvePromise({
         server,
@@ -1133,4 +1019,4 @@ if (isEntry) {
   process.on("SIGTERM", shutdown);
 }
 
-export { REGISTRY_VERSION };
+

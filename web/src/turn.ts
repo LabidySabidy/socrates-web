@@ -81,3 +81,23 @@ export function isSilent(turn: TurnState): boolean {
   const { thinking, prose } = splitTurn(turn);
   return thinking.length === 0 && prose.trim().length === 0;
 }
+
+/**
+ * The learner-facing text of an `[ERROR] …` frame from `/api/stream`.
+ *
+ * The server frames errors as `[ERROR] {"error":"…"}` so the shape matches the JSON deltas on the
+ * same channel. Rendering that literal put `{"error":"pi process exited"}` in front of the learner,
+ * so the wrapper is stripped here; anything that is not JSON is shown as it arrived, because a
+ * crashed process can emit whatever it likes and swallowing it would hide the only clue.
+ */
+export function streamErrorText(frame: string): string {
+  const payload = frame.replace(/^\[ERROR\]\s*/, "").trim();
+  if (!payload) return "the turn failed with no message";
+  try {
+    const parsed = JSON.parse(payload) as { error?: unknown };
+    if (typeof parsed?.error === "string" && parsed.error.trim()) return parsed.error;
+  } catch {
+    /* not JSON: show it as it arrived */
+  }
+  return payload;
+}
