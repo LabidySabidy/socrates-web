@@ -152,13 +152,15 @@ export function HomePage({
                   <h2 className="name">{course.label}</h2>
                   <p className="desc">
                     {course.concepts === 0
-                      ? "No concept cards yet."
+                      ? "Started, but not scaffolded yet — the tutor writes the concept cards with you."
                       : `${course.concepts} concept${course.concepts === 1 ? "" : "s"}${
                           course.fromRegistry && !course.fromScan ? " · registered" : ""
                         }`}
                   </p>
                   <div className="footer">
-                    {course.concepts} unit{course.concepts === 1 ? "" : "s"}
+                    {course.concepts === 0
+                      ? "Not scaffolded yet"
+                      : `${course.concepts} unit${course.concepts === 1 ? "" : "s"}`}
                     {course.sessions.count > 0 ? ` · ${course.sessions.count} session${course.sessions.count === 1 ? "" : "s"}` : ""}
                   </div>
                 </a>

@@ -40,7 +40,15 @@ import {
   tryAgain,
 } from "./quiz.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
-import { grillHref, grillPrompt, isGrillPrompt, parseAsk } from "./grill.ts";
+import {
+  grillHref,
+  grillPrompt,
+  isGrillPrompt,
+  parseAsk,
+  scaffoldHref,
+  scaffoldPrompt,
+  SCAFFOLD_SKILL,
+} from "./grill.ts";
 import { appendUser, isTranscriptEmpty, settleAssistant, type ChatTurn } from "./transcript.ts";
 import {
   isPassiveText,
@@ -957,7 +965,7 @@ test("the grill prompt is the mechanism, and is exactly what the original posted
 });
 
 test("a grill href round-trips its prompt", () => {
-  const href = grillHref("DriftScout", 2, grillPrompt("rls-policies"));
+  const href = grillHref("DriftScout", 2, "rls-policies");
   assert.match(href, /^#\/lesson\/DriftScout\/2\?ask=/);
   assert.equal(parseAsk(href), "/skill:grill-misconception rls-policies");
 });
@@ -965,7 +973,7 @@ test("a grill href round-trips its prompt", () => {
 test("the ask parameter does not corrupt the unit it travels with", () => {
   // Regression guard: splitting the query late fed `1?ask=%2Fskill...` to Number(), which is NaN, which
   // silently fell back to unit 1 — the grill would have opened the wrong unit every time.
-  const route = parseHash(grillHref("DriftScout", 3, grillPrompt("client-data-flow")));
+  const route = parseHash(grillHref("DriftScout", 3, "client-data-flow"));
   assert.equal(route.name, "lesson");
   if (route.name !== "lesson") return;
   assert.equal(route.courseId, "DriftScout");
@@ -1132,4 +1140,39 @@ test("the transcript interleaves in order and only reports empty when it is", ()
     ["user:q1", "assistant:a1", "user:q2", "assistant:a2"],
   );
   assert.equal(isTranscriptEmpty(h), false);
+});
+
+// ---------------------------------------------------------------------------
+// T-044 — a started-but-empty course says so, and offers the path
+// ---------------------------------------------------------------------------
+
+test("the scaffold dispatch targets the scaffold skill, with a colon", () => {
+  // `/skill:scaffold-learning` is explicit-invocation-only. A slash instead of a colon would invoke
+  // nothing — the same typo class that was corrected in the P9 report.
+  assert.equal(SCAFFOLD_SKILL, "/skill:scaffold-learning");
+  assert.ok(SCAFFOLD_SKILL.includes(":"));
+  assert.equal(scaffoldPrompt(), SCAFFOLD_SKILL);
+});
+
+test("the scaffold href is a lesson route carrying the prompt, and round-trips", () => {
+  const href = scaffoldHref("unstarted-project");
+  assert.match(href, /^#\/lesson\/unstarted-project\/1\?ask=/);
+  assert.equal(parseAsk(href), "/skill:scaffold-learning");
+  const route = parseHash(href);
+  assert.equal(route.name, "lesson");
+  if (route.name === "lesson") {
+    assert.equal(route.courseId, "unstarted-project");
+    assert.equal(route.unit, 1);
+    assert.equal(route.ask, "/skill:scaffold-learning");
+  }
+});
+
+test("the grill and scaffold dispatches share one mechanism", () => {
+  // One route, one parser, one dispatch in the lesson: a second mechanism would be a second thing to
+  // keep working.
+  const grill = grillHref("c", 2, "hooks");
+  assert.equal(parseAsk(grill), "/skill:grill-misconception hooks");
+  assert.equal(grill.startsWith("#/lesson/c/2?ask="), true);
+  assert.equal(scaffoldHref("c").startsWith("#/lesson/c/1?ask="), true);
+  assert.notEqual(parseAsk(grill), parseAsk(scaffoldHref("c")));
 });

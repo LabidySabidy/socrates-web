@@ -648,3 +648,17 @@ a.mod:hover { text-decoration: none; }
   line-height: 1.7;
   white-space: pre-wrap;
 }
+
+.rail-empty { padding: 0 20px; line-height: 1.6; }
+.rail-empty a { color: var(--action); }
+.empty-note .scaffold-action {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border: 1px solid var(--action);
+  border-radius: 6px;
+  color: var(--action);
+  text-decoration: none;
+}
+.empty-note .scaffold-action:hover { background: var(--action-tint); text-decoration: none; }
+.empty-note code { font-size: 12.5px; }

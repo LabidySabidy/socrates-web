@@ -316,10 +316,16 @@
       destination, the submit button stays disabled until the destination is non-empty, and the file on disk
       carries the typed words with `<fill in later>` for the blank field. 2 unit tests cover the refusals
       (empty destination, no learning dir, already initiated).
-- [ ] **T-044** A UI-started course has `MISSION.md` only, so it renders **0 units** until the scaffold skill
-      writes `PLAN.md`/`SCHEMA.md`. That is correct, but from the catalogue it looks broken. **Done when:** a
-      started-but-empty course says so on its catalogue card and on its unit rail, and the course page offers
-      the path to scaffold it. The unit rail's empty state exists; the card and the next-step affordance do not.
+- [x] **T-044** A UI-started course has `MISSION.md` only, so it renders **0 units** until the scaffold skill
+      writes `PLAN.md`/`SCHEMA.md`. That is correct, but from the catalogue it looks broken.
+      **Done** — the catalogue card reads "Started, but not scaffolded yet — the tutor writes the concept cards
+      with you" with the footer "Not scaffolded yet" instead of "0 units"; the unit rail says there are no units
+      and offers the path; the pane explains WHY (units are derived from concept cards), says this is a normal
+      state rather than a broken one, and offers **Scaffold this course with the tutor**. That dispatches
+      `/skill:scaffold-learning` through the SAME ask mechanism as the grill (`askHref`), so there is one way a
+      click starts a session rather than two.
+      **Browser-verified end to end:** the card, rail and pane all say so; the action lands on the lesson with
+      the prompt dispatched and visible as the learner's own turn; the tutor begins the interview.
 - [ ] **T-034** Derived persistence signal — review cycles survived — rendered as a small tick, never a
       colour. Behaviourally grounded, so honest to derive. **Not to be started without an explicit ask.**
 - [x] **T-037** Client test for the tray + mastery colour mapping, so drift is caught without a browser.

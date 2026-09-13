@@ -24,9 +24,34 @@ export function isGrillPrompt(text: string): boolean {
   return text.trim().startsWith(GRILL_SKILL);
 }
 
-/** A lesson route carrying a prompt to dispatch on arrival. */
-export function grillHref(courseId: string, unit: number, prompt: string): string {
+/**
+ * A lesson route carrying a prompt to dispatch on arrival.
+ *
+ * This is the general mechanism; `grillHref` is one caller of it. The scaffold dispatch below uses
+ * the same route rather than a second one, so there is one way a click can start a session.
+ */
+export function askHref(courseId: string, unit: number, prompt: string): string {
   return `#/lesson/${encodeURIComponent(courseId)}/${unit}?ask=${encodeURIComponent(prompt)}`;
+}
+
+export function grillHref(courseId: string, unit: number, concept: string): string {
+  return askHref(courseId, unit, grillPrompt(concept));
+}
+
+/**
+ * The scaffold dispatch, for a course that was started but never filled in.
+ *
+ * `/skill:scaffold-learning` is explicit-invocation-only and takes no argument: it interviews the
+ * learner. Dispatched bare, from inside the course directory, so the tutor can read MISSION.md.
+ */
+export const SCAFFOLD_SKILL = "/skill:scaffold-learning";
+
+export function scaffoldPrompt(): string {
+  return SCAFFOLD_SKILL;
+}
+
+export function scaffoldHref(courseId: string): string {
+  return askHref(courseId, 1, scaffoldPrompt());
 }
 
 /**

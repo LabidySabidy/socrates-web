@@ -6,7 +6,7 @@ import { MASTERY_STATES, mastery } from "../severity.ts";
 import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { useCourseWatch } from "../watch.ts";
-import { grillHref, grillPrompt } from "../grill.ts";
+import { grillHref, scaffoldHref } from "../grill.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
@@ -120,7 +120,8 @@ export function CoursePage({
    */
   const grillTo = (concept: string) => {
     const unit = tree.units.find((u) => u.title.toLowerCase() === concept.toLowerCase());
-    return grillHref(courseId, unit?.n ?? selected?.n ?? 1, grillPrompt(concept));
+    // The href builder owns the prompt: a caller passes the concept, never a hand-built command.
+    return grillHref(courseId, unit?.n ?? selected?.n ?? 1, concept);
   };
   const current = courses.find((c) => c.id === courseId);
 
@@ -159,8 +160,9 @@ export function CoursePage({
         ))}
 
         {tree.units.length === 0 ? (
-          <p className="tray-empty" style={{ padding: "0 20px" }}>
-            No concept cards in this course yet.
+          <p className="tray-empty rail-empty">
+            No concept cards yet, so there are no units to show.{" "}
+            <a href={scaffoldHref(courseId)}>Scaffold this course</a>.
           </p>
         ) : null}
 
@@ -264,8 +266,19 @@ export function CoursePage({
             </>
           ) : (
             <div className="empty-note">
-              <h2>No units yet</h2>
-              <p>This course has no concept cards, so there is nothing to derive.</p>
+              <h2>This course is not scaffolded yet</h2>
+              <p>
+                It has a mission but no <code>SCHEMA.md</code> concept cards, and units are derived
+                from concept cards — so there is nothing to derive yet. That is a normal state for a
+                course you just started, not a broken one.
+              </p>
+              <p>
+                The tutor can interview you and write the concept cards and the plan. It runs inside
+                this course's directory, so it can read the mission.
+              </p>
+              <a className="primary scaffold-action" href={scaffoldHref(courseId)}>
+                Scaffold this course with the tutor
+              </a>
             </div>
           )}
 
