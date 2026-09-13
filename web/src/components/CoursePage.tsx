@@ -1,10 +1,11 @@
 /** CoursePage — the two-pane browser: fixed unit rail, independently scrolling module pane. */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchCourse, fetchLearning } from "../api.ts";
 import type { CourseRef, CourseTree, LearningData, Unit } from "../types.ts";
 import { MASTERY_STATES, mastery } from "../severity.ts";
 import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.ts";
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
+import { useCourseWatch } from "../watch.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
@@ -51,6 +52,27 @@ export function CoursePage({
     });
     return () => cancelAnimationFrame(id);
   }, [tree, courseId, unitNumber]);
+
+  const reload = useCallback(() => {
+    Promise.all([fetchCourse(courseId), fetchLearning(courseId)])
+      .then(([t, l]) => {
+        setTree(t);
+        setLearning(l);
+      })
+      .catch(() => {
+        /* a failed refresh keeps the last good view */
+      });
+  }, [courseId]);
+
+  // The tutor writes SCHEMA.md mid-session; pick that up without a page reload.
+  useCourseWatch(
+    useCallback(
+      (changed: string) => {
+        if (changed === courseId) reload();
+      },
+      [courseId, reload],
+    ),
+  );
 
   useEffect(() => {
     let alive = true;

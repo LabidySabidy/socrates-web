@@ -6,6 +6,7 @@
  * eyeballing a screenshot.
  */
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { activeCount, trayRows } from "./misconceptions.ts";
 import { SEVERITY_COLOR, SEVERITY_LABEL, MASTERY_STATES, mastery } from "./severity.ts";
@@ -726,4 +727,47 @@ test("accuracy is null until a shot is taken", () => {
 test("the band fraction maps to bar geometry", () => {
   assert.deepEqual(bandFraction([40, 60]), { start: 0.4, width: 0.2 });
   assert.deepEqual(bandFraction([-10, 200]), { start: 0, width: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// expr.ts must stay importable by the SERVER
+// ---------------------------------------------------------------------------
+
+test("expr.ts imports nothing and touches no browser global", () => {
+  // The server imports this module to validate a spec, so there is one opinion about what a formula
+  // means. That is only safe while the file stays pure — a single `window` or `document` reference
+  // would break every server-side validation at import time, and the failure would look like a
+  // broken feature rather than a misplaced global.
+  const url = new URL("./expr.ts", import.meta.url);
+  const source = readFileSync(url, "utf8");
+
+  // Strip comments first: prose about `window` is not a reference to it.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  const forbidden = [
+    "window",
+    "document",
+    "navigator",
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "fetch",
+    "XMLHttpRequest",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "process",
+    "require",
+  ];
+  // Identifier match WITHOUT any backslashes: `\b` in a template literal is the backspace
+  // character, not a regex word boundary, so `new RegExp(`\b${name}\b`)` silently matches nothing
+  // and the guard passes while violating its own premise.
+  const isIdentifier = (src: string, name: string) =>
+    new RegExp("(^|[^A-Za-z0-9_$])" + name + "([^A-Za-z0-9_$]|$)").test(src);
+
+  for (const name of forbidden) {
+    assert.equal(isIdentifier(code, name), false, `expr.ts must not reference ${name}`);
+  }
+
+  assert.equal(/^\s*import\s/m.test(code), false, "expr.ts imports nothing, so it has no dependencies");
+  assert.equal(/^\s*export\s+default/m.test(code), false, "no default export that could carry state");
 });

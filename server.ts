@@ -169,6 +169,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   let activeStream: ServerResponse | null = null;
   /** Which course the in-flight (or most recent) turn belongs to. */
   let turnCourse: string | null = null;
+  /**
+   * Change notifications get their OWN channel. `/api/stream` carries a chat turn and deliberately
+   * allows a single subscriber; a page that only wants to know when a file changed must not have to
+   * occupy that slot, and must not be starved of updates because a turn is open elsewhere.
+   */
+  const watchStreams = new Set<ServerResponse>();
   const bridge = new ProcessBridge(projectDir);
   const defaultCourseId = () => basename(resolve(projectDir));
 
@@ -245,8 +251,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   }
 
   function pushReload(courseId: string): void {
-    const res = activeStream;
-    if (!res) return;
+    if (watchStreams.size === 0 && !activeStream) return;
     const result = discover();
     const ref = findCourse(result, courseId);
     const payload: Record<string, unknown> = { type: "reload", course: courseId };
@@ -257,8 +262,17 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         payload.error = err instanceof Error ? err.message : String(err);
       }
     }
+    const frame = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const res of watchStreams) {
+      try {
+        res.write(frame);
+      } catch {
+        watchStreams.delete(res);
+      }
+    }
+    // A chat stream may also be open; it ignores frames it does not know.
     try {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      activeStream?.write(frame);
     } catch {
       /* ignore */
     }
@@ -853,6 +867,25 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       return;
     }
 
+    if (url === "/api/watch") {
+      res.writeHead(200, SSE_HEADERS);
+      res.write(`data: ${JSON.stringify({ type: "watching", courses: discover().courses.map((c) => c.id) }) }\n\n`);
+      watchStreams.add(res);
+      // A comment frame keeps intermediaries from closing an idle connection.
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(": ping\n\n");
+        } catch {
+          /* closed */
+        }
+      }, 25_000);
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        watchStreams.delete(res);
+      });
+      return;
+    }
+
     if (url === "/api/stream") {
       if (!chatEnabled) {
         sendJson(res, 503, { error: "chat is disabled" });
@@ -909,6 +942,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         close: () =>
           new Promise<void>((done) => {
             closeWatchers();
+            for (const res of watchStreams) {
+              try {
+                res.end();
+              } catch {
+                /* ignore */
+              }
+            }
+            watchStreams.clear();
             if (chatEnabled) bridge.kill();
             server.close(() => done());
           }),
