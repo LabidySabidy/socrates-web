@@ -360,8 +360,20 @@
       out in full rather than inferred).
       **Robustness fix:** the original tested each `text_delta` in isolation, so a token split across two chunks
       was missed. Detection now runs over the accumulated prose; a test covers the straddling case.
-- [ ] **T-048** Passivity intercept as a real gate (REDESIGN — behaviour change). **Done when:** after the
+- [x] **T-048** Passivity intercept as a real gate (REDESIGN — behaviour change). **Done when:** after the
       tutor's `PASSIVITY` notify, a passive draft cannot be submitted, a real explanation can, and sending one
       clears the intercept.
+      **Done** — `web/src/passivity.ts` with `PASSIVE_RE` ported verbatim and the banner copy verbatim. Trigger
+      PORTED (the tutor's notify; the client never diagnoses passivity). Gate REDESIGNED and labelled in the UI
+      as a change: with the intercept active a passive draft cannot be sent. 5 tests.
+      **Browser-verified** with a mock producer for the notification (no such extension is installed here, so
+      the frame is generated deterministically): banner appears on the tutor's signal → "ok" leaves the button
+      disabled reading "Explain it" → a real explanation enables "Send" → sending clears the intercept and the
+      next turn streams.
+- [ ] **T-050** The lesson console never renders the learner's own message. The original did —
+      `append("user", message)` at `06cee66^:public/app.js:183` — and the handoff specifies learner turns as
+      high-contrast and right-aligned. Found while verifying T-048 (a sent explanation left no visible trace).
+      **Done when:** the console shows each learner turn, and a sent message is visible without scrolling away
+      from the tutor's reply.
 - [ ] **T-049** Budapest mode as a structured `mode` on `POST /api/chat` (REDESIGN). **Done when:** with the
       toggle on, the modifier reaches the server's outgoing prompt while the posted message does not.

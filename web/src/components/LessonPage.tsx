@@ -15,6 +15,13 @@ import { hrefCourse, hrefLesson } from "../router.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, type TurnState } from "../turn.ts";
 import {
+  isPassiveText,
+  isPassivitySignal,
+  maySubmit,
+  PASSIVITY_MESSAGE,
+  refusalReason,
+} from "../passivity.ts";
+import {
   formatCountdown,
   isFrozen,
   REST_BODY,
@@ -51,6 +58,8 @@ export function LessonPage({
   const [gateOpen, setGateOpen] = useState(false);
   const [remaining, setRemaining] = useState(REST_SECONDS);
   const gateSeen = useRef(false);
+  /** The tutor's passivity intercept. Active until a real explanation is sent. */
+  const [intercept, setIntercept] = useState(false);
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -78,6 +87,8 @@ export function LessonPage({
   // Everything from a gate token onward is a control signal, not content.
   const { prose, token } = splitAtGate(rawProse);
   const frozen = isFrozen(gateOpen, remaining);
+  const blocked = refusalReason(intercept, input) === "passive";
+  const canSend = maySubmit(intercept, input) && !busy && !frozen;
 
   // Open once, on the first turn that carries a token.
   useEffect(() => {
@@ -130,6 +141,10 @@ export function LessonPage({
     if (!message || busy) return;
     // The gate is a freeze, not a suggestion — same as the original's setBusy(true).
     if (frozen) return;
+    // BEHAVIOUR CHANGE: the original banner never blocked. This refuses a passive draft while the
+    // tutor has signalled the intercept, and clears it once a real explanation goes out.
+    if (!maySubmit(intercept, message)) return;
+    if (intercept && !isPassiveText(message)) setIntercept(false);
     setInput("");
     setBusy(true);
     setError(null);
@@ -180,6 +195,11 @@ export function LessonPage({
         parsed = JSON.parse(raw) as { type?: string; assistantMessageEvent?: unknown };
       } catch {
         return; // a non-JSON line (e.g. raw stdout) is not part of the turn
+      }
+      if (isPassivitySignal(parsed)) {
+        // Trigger preserved: the TUTOR signals passivity, the client never diagnoses it.
+        setIntercept(true);
+        return;
       }
       if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
         setTurn((prev) => reduceTurn(prev, parsed!.assistantMessageEvent));
@@ -267,11 +287,24 @@ export function LessonPage({
           type="button"
           className="primary"
           onClick={() => void send()}
-          disabled={busy || frozen || !input.trim()}
+          disabled={!canSend}
+          title={blocked ? "Write a real explanation before sending" : undefined}
         >
-          {busy ? "Waiting…" : frozen ? "Resting…" : "Send"}
+          {busy ? "Waiting…" : frozen ? "Resting…" : blocked ? "Explain it" : "Send"}
         </button>
       </div>
+
+      {intercept ? (
+        <div className="passivity" role="status">
+          <p>{PASSIVITY_MESSAGE}</p>
+          {blocked ? (
+            <p className="passivity-gate">
+              Sending is paused until this is a real explanation. This is a change from the original
+              intercept, which only displayed a banner.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {gateOpen ? (
         <div className="scrim" role="dialog" aria-modal="true" aria-label={REST_HEADING}>

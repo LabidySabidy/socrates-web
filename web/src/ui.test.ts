@@ -42,6 +42,12 @@ import {
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
 import { grillHref, grillPrompt, isGrillPrompt, parseAsk } from "./grill.ts";
 import {
+  isPassiveText,
+  isPassivitySignal,
+  maySubmit,
+  refusalReason,
+} from "./passivity.ts";
+import {
   findGateToken,
   formatCountdown,
   isFrozen,
@@ -1038,4 +1044,50 @@ test("the gate freezes the composer for the whole countdown, then releases it", 
   assert.equal(isFrozen(true, 0), false, "released exactly at zero");
   assert.equal(isFrozen(false, 300), false, "an unopened gate freezes nothing");
   assert.equal(REST_SECONDS, 300, "five minutes, as the original hard-coded");
+});
+
+// ---------------------------------------------------------------------------
+// P11 — the passivity intercept
+// ---------------------------------------------------------------------------
+
+test("the passive regex is ported verbatim and matches what it always matched", () => {
+  for (const word of ["ok", "OK", "okay", "k", "kk", "cool", "got it", "gotit", "makes sense", "next", "proceed",
+    "continue", "go on", "y", "yes", "yeah", "sure", "fine", "right", "nice", "great", "...", "   ok   "]) {
+    assert.equal(isPassiveText(word), true, `${word} should read as passive`);
+  }
+  for (const word of ["", "state is a snapshot", "no", "yes but the closure is stale", "ok, but why?"]) {
+    assert.equal(isPassiveText(word), false, `${JSON.stringify(word)} is not passive`);
+  }
+});
+
+test("with no intercept active, nothing is gated — the original behaviour", () => {
+  assert.equal(maySubmit(false, "ok"), true, "the old banner never blocked");
+  assert.equal(maySubmit(false, "a real explanation"), true);
+  assert.equal(refusalReason(false, "ok"), null);
+});
+
+test("with the intercept active, a passive draft is refused and an explanation is not", () => {
+  assert.equal(maySubmit(true, "ok"), false, "BEHAVIOUR CHANGE: this is refused now");
+  assert.equal(refusalReason(true, "ok"), "passive");
+  assert.equal(maySubmit(true, "State is a snapshot taken when the render begins, not a live reference."), true);
+  assert.equal(refusalReason(true, "a real explanation"), null, "and that is what clears it");
+});
+
+test("an empty draft is never submittable, intercept or not", () => {
+  assert.equal(maySubmit(false, "   "), false);
+  assert.equal(maySubmit(true, ""), false);
+  assert.equal(refusalReason(true, "  "), null, "nothing is refused for being empty; it is just unsubmittable");
+});
+
+test("the trigger is the tutor's signal, not client-side detection", () => {
+  // app.js:247-249 — `e.method === "notify" && e.message.includes("PASSIVITY")`
+  assert.equal(isPassivitySignal({ type: "extension_ui_request", method: "notify", message: "PASSIVITY" }), true);
+  assert.equal(
+    isPassivitySignal({ type: "extension_ui_request", method: "notify", message: "⚠️ [PASSIVITY INTERCEPT] …" }),
+    true,
+  );
+  assert.equal(isPassivitySignal({ type: "extension_ui_request", method: "notify", message: "something else" }), false);
+  assert.equal(isPassivitySignal({ type: "message_update", method: "notify", message: "PASSIVITY" }), false);
+  assert.equal(isPassivitySignal({ type: "extension_ui_request", method: "select", message: "PASSIVITY" }), false);
+  assert.equal(isPassivitySignal(null), false);
 });

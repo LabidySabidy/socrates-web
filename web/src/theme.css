@@ -617,3 +617,15 @@ a.mod:hover { text-decoration: none; }
 /* sprint rest gate — the app's existing dialog treatment, not the original's dark overlay */
 .countdown { font-family: var(--display); font-size: 2.6rem; font-variant-numeric: tabular-nums; margin-top: 18px; }
 .rest-gate { text-align: center; max-width: 440px; }
+
+/* passivity intercept — ported copy, and the gate the original never had */
+.passivity {
+  border-top: 1px solid var(--warning);
+  border-bottom: 1px solid var(--warning);
+  background: rgba(217, 119, 6, 0.05);
+  padding: 10px 28px;
+  color: var(--warning-strong);
+  font-size: 13px;
+}
+.passivity p { margin: 0; }
+.passivity-gate { margin-top: 6px !important; color: var(--ink-55); font-size: 12.5px; }
