@@ -108,9 +108,6 @@ export function SliderInteractive({ spec }: { spec: SliderSpec }) {
           </label>
         ))}
       </div>
-      {spec.cites.length > 0 ? (
-        <p className="eyebrow quiz-cite">Source: {spec.cites.join(", ")}</p>
-      ) : null}
     </div>
   );
 }
@@ -170,9 +167,6 @@ export function TargetWindowGame({ spec }: { spec: TargetWindowSpec }) {
       </p>
       {state.phase === "resolved" ? (
         <p className="eyebrow">clearing in {Math.max(0, CLEAR_AFTER_SECONDS - state.sinceOutcome).toFixed(1)}s</p>
-      ) : null}
-      {spec.cites.length > 0 ? (
-        <p className="eyebrow quiz-cite">Source: {spec.cites.join(", ")}</p>
       ) : null}
     </div>
   );

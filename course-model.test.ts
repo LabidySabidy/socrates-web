@@ -86,7 +86,6 @@ test("derives one unit per concept card, with derived study modules", () => {
 
   assert.equal(course.warnings.length, 0, `unexpected warnings: ${course.warnings}`);
   assert.equal(course.derived, true);
-  assert.equal(course.kind, "topic");
   assert.equal(course.title, "derive a course tree from learning markdown without inventing data");
 
   assert.deepEqual(course.units.map((u) => u.title), ["alpha-one", "beta-two", "gamma-three"]);
@@ -175,11 +174,10 @@ test("a course directory that does not exist degrades instead of throwing", () =
 // T-011 — COURSE.md manifest wins over the derivation
 // ---------------------------------------------------------------------------
 
-test("a manifest replaces the derived tree and may set kind and title", () => {
+test("a manifest replaces the derived tree and may set the title", () => {
   const course = buildCourse(load("course-manifest"));
 
   assert.equal(course.derived, false, "manifest is authoritative");
-  assert.equal(course.kind, "codebase");
   assert.equal(course.title, "Manifest Override (authored)");
   assert.deepEqual(course.units.map((u) => u.title), ["Authored Unit", "Second Unit"]);
   assert.equal(course.units[0].blurb, "A blurb written by hand, not derived.");

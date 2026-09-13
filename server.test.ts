@@ -104,14 +104,11 @@ test("GET /api/courses lists discovered courses with their metadata", async (t) 
 
   const basic = body.courses.find((c: { id: string }) => c.id === "course-basic");
   assert.equal(basic.concepts, 3);
-  assert.equal(basic.kind, "topic");
   assert.equal(basic.label, "derive a course tree from learning markdown without inventing data");
   assert.equal(basic.hidden, false);
   assert.equal(basic.fromScan, true);
   assert.equal(basic.fromRegistry, false);
 
-  const manifest = body.courses.find((c: { id: string }) => c.id === "course-manifest");
-  assert.equal(manifest.kind, "codebase");
 });
 
 test("discovery marks a learning folder without MISSION.md as not initiated", async (t) => {
@@ -740,7 +737,6 @@ test("GET /api/courses/:id/interactives returns authored specs, validated", asyn
   assert.equal(slider.fn, "m * x + b");
   assert.deepEqual(slider.xRange, [-6, 6]);
   assert.deepEqual(slider.params.map((p: { name: string }) => p.name), ["m", "b"]);
-  assert.deepEqual(slider.cites, ["src/slope.ts#L2"]);
 
   const game = body.interactives[1].spec;
   assert.deepEqual(game.band, [44, 56]);

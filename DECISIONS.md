@@ -321,3 +321,41 @@ filesystem listing on the LAN is not.
 **Tradeoffs:** The app exposes directory names to anything that can reach the port, which is why the
 default bind changed in the same commit. Anyone who wants LAN access sets `HOST=0.0.0.0` deliberately
 and now knows what that publishes.
+
+## 2026-09-13 — A course is a subject, not a folder. Codebase courses and the discovery stack are removed
+
+**Context:** The app grew two ideas of what a course is. A `topic` course was a subject the learner
+articulated; a `codebase` course was a directory somewhere on disk, found by scanning a root, listed in
+a registry that could pin, order, label and hide entries, and whose generated quiz items had to cite
+real repository files. That second idea produced: `COURSES_ROOT`, a one-level `*/.agent/learning` scan,
+a `.agent/courses.json` registry, a "not initiated (no MISSION.md)" list, a folder picker, and the whole
+citation and citation-resolution path.
+
+**Decision:** A course is a **subject the learner articulates**. There is one store —
+`~/.socrates/courses/<slug>/.agent/learning/` — and the pi session runs with `cwd` set there, so the
+learning extensions write telemetry in place with no change. `PROJECT_DIR` and `COURSES_ROOT` are gone.
+Starting a course asks for the subject, creates the directory, and dispatches
+`/skill:scaffold-learning` through the same `askHref` mechanism the grill uses; the tutor then
+interviews the learner and those answers become `MISSION.md`. `scaffold-learning` is the primary entry
+point rather than a rescue path.
+
+Removed outright, not deprecated and not behind a flag: `kind: codebase`; `cites` on items; citation
+resolution; the `citation-not-found` path; repo-artifact grounding; the scan; the registry; pin / order
+/ label / hide; `uninitiatedCourses`; the folder browser (`/api/fs`, `FolderPicker`, `fs-browse.ts`);
+T-041 (writing `MISSION.md` into a project directory) and T-044 (a started-but-unscaffolded course),
+both superseded by the articulate flow. Tests covering removed code were deleted with it.
+
+**CONSEQUENCE, recorded rather than buried: a generated item can no longer be grounded in a real
+file.** `T-042` said validation was structural plus citation-resolvable, so a wrong-but-well-cited item
+could pass; with citations gone, validation is structural only. Nothing in use regresses: `topic`
+courses never had citations, and the citation path was introduced for codebase courses in the same
+project, never relied on outside it.
+
+**Alternatives considered:** keeping `codebase` as an unused variant behind a flag — rejected; a flag
+leaves the registry, the scan, the folder picker and the citation tests to maintain, and the user asked
+for removal. Migrating course directories in place — rejected; a single store is what makes
+`PROJECT_DIR` deletable.
+
+**Tradeoffs:** Courses no longer live beside the code they might be about, and a learner cannot point at
+an existing project. In exchange there is one storage model, one entry point, and no filesystem browsing
+in the API. DriftScout's `.agent/learning` is migrated in as a one-time copy.

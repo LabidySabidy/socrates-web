@@ -372,9 +372,6 @@ export function QuizPage({
                   ))}
                 </ol>
               ) : null}
-              {item.cites.length > 0 ? (
-                <p className="eyebrow quiz-cite">Source: {item.cites.join(", ")}</p>
-              ) : null}
             </div>
           ) : null}
 

@@ -76,7 +76,6 @@ export interface CourseTree {
   id: string;
   dir: string;
   title: string;
-  kind: "topic" | "codebase";
   derived: boolean;
   warnings: string[];
   mission: Mission;
@@ -99,7 +98,6 @@ export interface CourseRef {
   sessions: { count: number; lastAt: string | null };
   /** A course must have been INITIATED: `.agent/learning/MISSION.md` exists. */
   initiated: boolean;
-  kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;
 }

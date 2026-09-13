@@ -43,7 +43,6 @@ import {
   awardedBadge,
   badgeState,
   buildGenerationPrompt,
-  courseOracle,
   extractItems,
   raisesBadge,
   readCache,
@@ -621,7 +620,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           const prompt = buildGenerationPrompt({
             courseTitle: tree.title,
             unitTitle: unitTree.title,
-            kind: tree.kind,
             concepts: unitTree.concepts,
             count,
           });
@@ -642,8 +640,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           }
 
           const { items, errors } = validateItems(extracted.raw, {
-            kind: tree.kind,
-            oracle: courseOracle(ref.dir),
             prefix: `unit${wanted}-q`,
           });
           if (items.length === 0) {
@@ -738,7 +734,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           const prompt = buildInteractivePrompt({
             courseTitle: tree.title,
             unitTitle: unitTree.title,
-            kind: tree.kind,
             concepts: unitTree.concepts,
           });
           const turn = await runTurn(ref.dir, prompt);
@@ -756,8 +751,6 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             return;
           }
           const { specs, errors } = validateSpecs(extracted.raw, {
-            kind: tree.kind,
-            oracle: courseOracle(ref.dir),
             prefix: `unit${wanted}-i`,
           });
           if (specs.length === 0) {

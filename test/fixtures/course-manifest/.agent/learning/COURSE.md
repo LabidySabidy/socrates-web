@@ -1,7 +1,6 @@
 # Course — Manifest Override
 
 ```yaml
-kind: codebase
 title: Manifest Override (authored)
 ```
 

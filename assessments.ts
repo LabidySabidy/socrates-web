@@ -9,10 +9,8 @@
  * generated item that fails validation produces an error the UI can show, never a half-rendered
  * question — a quiz with a missing answer is worse than no quiz.
  *
- * For a `codebase` course an item must cite a real artifact from the repository, and the citation
- * is checked against the filesystem before the item is accepted.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -55,8 +53,6 @@ export interface AssessmentItem {
   accepts: string[];
   hints: string[];
   steps: string[];
-  /** Repo-relative citations. Required for a `codebase` course. */
-  cites: string[];
 }
 
 export interface Quiz {
@@ -67,17 +63,9 @@ export interface Quiz {
   source: "authored" | "generated" | "cache";
 }
 
-export interface CiteOracle {
-  exists(rel: string): boolean;
-  lineCount(rel: string): number | null;
-}
-
 export const WARN = {
   answerTooLong: (words: number, chars: number) =>
     `answer-too-long-for-auto-grading:${words}-words-${chars}-chars-use-self-check`,
-  needsCite: "item-missing-citation",
-  badCite: (c: string) => `citation-not-found:${c}`,
-  badLine: (c: string, n: number) => `citation-line-out-of-range:${c}#L${n}`,
   noPrompt: "item-missing-prompt",
   noAnswer: "item-missing-answer",
   noHints: "item-missing-hints",
@@ -133,55 +121,12 @@ export function raisesBadge(current: string | undefined, awarded: string): boole
 }
 
 // ---------------------------------------------------------------------------
-// Citation checking
-// ---------------------------------------------------------------------------
-
-/** `src/a.sql#L12` -> `{ path: "src/a.sql", line: 12 }`. */
-export function parseCite(cite: string): { path: string; line: number | null } {
-  const m = /^(.*?)#L(\d+)$/.exec(cite.trim());
-  if (!m) return { path: cite.trim(), line: null };
-  return { path: m[1], line: Number(m[2]) };
-}
-
-export function checkCite(cite: string, oracle: CiteOracle): string | null {
-  const { path, line } = parseCite(cite);
-  if (!path) return WARN.badCite(cite);
-  if (!oracle.exists(path)) return WARN.badCite(cite);
-  if (line !== null) {
-    const count = oracle.lineCount(path);
-    if (count === null || line < 1 || line > count) return WARN.badLine(path, line);
-  }
-  return null;
-}
-
-/** A filesystem oracle rooted at a course directory. */
-export function courseOracle(courseDir: string): CiteOracle {
-  const resolve = (rel: string) => join(courseDir, rel.replace(/^[/\\]+/, ""));
-  return {
-    exists(rel) {
-      try {
-        return statSync(resolve(rel)).isFile();
-      } catch {
-        return false;
-      }
-    },
-    lineCount(rel) {
-      try {
-        return readFileSync(resolve(rel), "utf8").split("\n").length;
-      } catch {
-        return null;
-      }
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Validation — the gate every item must pass
 // ---------------------------------------------------------------------------
 
 export function validateItem(
   raw: unknown,
-  ctx: { id: string; kind: "topic" | "codebase"; oracle: CiteOracle },
+  ctx: { id: string },
 ): ValidateResult {
   if (typeof raw !== "object" || raw === null) return { ok: false, error: "item is not an object" };
   const r = raw as Record<string, unknown>;
@@ -194,7 +139,6 @@ export function validateItem(
   const answer = str(r.answer);
   const hints = list(r.hints);
   const steps = list(r.steps);
-  const cites = list(r.cites);
   const accepts = list(r.accepts);
 
   if (!prompt) return { ok: false, error: WARN.noPrompt };
@@ -215,27 +159,23 @@ export function validateItem(
     };
   }
 
-  // Citations are validated on both course kinds, but only required for a codebase course.
-  const citeProblems = cites.map((c) => checkCite(c, ctx.oracle)).filter((e): e is string => e !== null);
-  if (citeProblems.length > 0) return { ok: false, error: citeProblems[0] };
-  if (ctx.kind === "codebase" && cites.length === 0) return { ok: false, error: WARN.needsCite };
 
   return {
     ok: true,
-    item: { id: ctx.id, prompt, answer, mode, accepts, hints, steps, cites },
+    item: { id: ctx.id, prompt, answer, mode, accepts, hints, steps },
   };
 }
 
 export function validateItems(
   raw: unknown,
-  ctx: { kind: "topic" | "codebase"; oracle: CiteOracle; prefix?: string },
+  ctx: { prefix?: string } = {},
 ): { items: AssessmentItem[]; errors: string[] } {
   const list = Array.isArray(raw) ? raw : [];
   const items: AssessmentItem[] = [];
   const errors: string[] = [];
   list.forEach((entry, i) => {
     const id = `${ctx.prefix ?? "q"}${i + 1}`;
-    const result = validateItem(entry, { id, kind: ctx.kind, oracle: ctx.oracle });
+    const result = validateItem(entry, { id });
     if (result.ok) items.push(result.item);
     else errors.push(`${id}: ${result.error}`);
   });
@@ -277,16 +217,10 @@ export function extractItems(text: string): { raw?: unknown; error?: string } {
 export function buildGenerationPrompt(input: {
   courseTitle: string;
   unitTitle: string;
-  kind: "topic" | "codebase";
   concepts: string[];
   count: number;
   existingPrompts?: string[];
 }): string {
-  const citeRule =
-    input.kind === "codebase"
-      ? `\n- Every item MUST include a "cites" array naming real files in this repository, as paths relative to the repository root, optionally with a line anchor (for example "src/db/migrations/003.sql#L12"). Read the files before citing them; a citation that does not exist fails validation and the item is rejected.`
-      : `\n- "cites" is optional. If you include one it must name a real file in this repository.`;
-
   return [
     `Produce ${input.count} assessment items for a quiz.`,
     ``,
@@ -299,7 +233,7 @@ export function buildGenerationPrompt(input: {
     ``,
     `Reply with ONE fenced json block and nothing else:`,
     "```json",
-    `{ "items": [ { "prompt": "...", "mode": "short-answer", "answer": "...", "accepts": ["..."], "hints": ["...", "...", "..."], "steps": ["...", "...", "..."], "cites": ["..."] } ] }`,
+    `{ "items": [ { "prompt": "...", "mode": "short-answer", "answer": "...", "accepts": ["..."], "hints": ["...", "...", "..."], "steps": ["...", "...", "..."] } ] }`,
     "```",
     ``,
     `Rules:`,
@@ -310,7 +244,6 @@ export function buildGenerationPrompt(input: {
     `- "hints" must be progressive: 3 short hints that narrow the answer without giving it away.`,
     `- "steps" is the full worked solution, in order.`,
     `- Do NOT include the answer inside "hints".`,
-    citeRule,
   ]
     .filter((line) => line !== "")
     .join("\n");

@@ -20,7 +20,6 @@ export interface SliderSpec {
   params: SliderParam[];
   xRange: [number, number];
   caption?: string;
-  cites: string[];
 }
 
 export interface TargetWindowSpec {
@@ -28,7 +27,6 @@ export interface TargetWindowSpec {
   speed: number;
   band: [number, number];
   caption?: string;
-  cites: string[];
 }
 
 export type Spec = SliderSpec | TargetWindowSpec;

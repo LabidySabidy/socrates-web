@@ -73,7 +73,6 @@ half-built tree.
 
 ```markdown
 ```yaml
-kind: codebase        # optional: topic (default) | codebase
 title: Authored title # optional: overrides the mission destination
 ```
 

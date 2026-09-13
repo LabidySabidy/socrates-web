@@ -12,7 +12,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compile } from "./web/src/expr.ts";
-import { checkCite, type CiteOracle } from "./assessments.ts";
 
 export interface SliderParam {
   name: string;
@@ -28,7 +27,6 @@ export interface SliderSpec {
   params: SliderParam[];
   xRange: [number, number];
   caption?: string;
-  cites: string[];
 }
 
 export interface TargetWindowSpec {
@@ -36,7 +34,6 @@ export interface TargetWindowSpec {
   speed: number;
   band: [number, number];
   caption?: string;
-  cites: string[];
 }
 
 export type Spec = SliderSpec | TargetWindowSpec;
@@ -59,7 +56,6 @@ export const WARN = {
   noXRange: "slider-missing-x-range",
   badSpeed: "game-speed-must-be-positive",
   badBand: "game-band-must-be-two-increasing-numbers",
-  needsCite: "interactive-missing-citation",
 } as const;
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -68,24 +64,9 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-/**
- * Validate a spec. `oracle` and `kind` are the course's, so the citation requirement matches the
- * assessments': mandatory for a `codebase` course, checked whenever present.
- */
-export function validateSpec(
-  raw: unknown,
-  ctx: { id: string; kind: "topic" | "codebase"; oracle: CiteOracle },
-): SpecResult {
+export function validateSpec(raw: unknown, ctx: { id: string }): SpecResult {
   if (typeof raw !== "object" || raw === null) return { ok: false, error: "spec is not an object" };
   const r = raw as Record<string, unknown>;
-  const cites = Array.isArray(r.cites)
-    ? r.cites.filter((c): c is string => typeof c === "string").map((c) => c.trim()).filter(Boolean)
-    : [];
-
-  const citeProblem = cites.map((c) => checkCite(c, ctx.oracle)).find((e) => e !== null);
-  if (citeProblem) return { ok: false, error: citeProblem };
-  if (ctx.kind === "codebase" && cites.length === 0) return { ok: false, error: WARN.needsCite };
-
   const caption = typeof r.caption === "string" && r.caption.trim() ? r.caption.trim() : undefined;
   const kind = typeof r.kind === "string" ? r.kind : "";
 
@@ -123,7 +104,7 @@ export function validateSpec(
     const xMax = xr ? num(xr[1]) : null;
     if (xMin === null || xMax === null || !(xMin < xMax)) return { ok: false, error: WARN.noXRange };
 
-    return { ok: true, spec: { kind: "slider", fn, params, xRange: [xMin, xMax], caption, cites } };
+    return { ok: true, spec: { kind: "slider", fn, params, xRange: [xMin, xMax], caption } };
   }
 
   if (kind === "target-window") {
@@ -142,7 +123,6 @@ export function validateSpec(
         speed: Math.min(Math.max(speed, 0.05), 5),
         band: [low, high],
         caption,
-        cites,
       },
     };
   }
@@ -152,13 +132,13 @@ export function validateSpec(
 
 export function validateSpecs(
   raw: unknown,
-  ctx: { kind: "topic" | "codebase"; oracle: CiteOracle; prefix?: string },
+  ctx: { prefix?: string } = {},
 ): { specs: Spec[]; errors: string[] } {
   const list = Array.isArray(raw) ? raw : [];
   const specs: Spec[] = [];
   const errors: string[] = [];
   list.forEach((entry, i) => {
-    const result = validateSpec(entry, { id: `${ctx.prefix ?? "i"}${i + 1}`, kind: ctx.kind, oracle: ctx.oracle });
+    const result = validateSpec(entry, { id: `${ctx.prefix ?? "i"}${i + 1}` });
     if (result.ok) specs.push(result.spec);
     else errors.push(`${ctx.prefix ?? "i"}${i + 1}: ${result.error}`);
   });
@@ -190,22 +170,15 @@ export function extractSpecs(text: string): { raw?: unknown; error?: string } {
 export function buildGenerationPrompt(input: {
   courseTitle: string;
   unitTitle: string;
-  kind: "topic" | "codebase";
   concepts: string[];
-  citeHintBlock?: string;
 }): string {
-  const citeRule =
-    input.kind === "codebase"
-      ? `\n- Include a "cites" array naming real files in this repository (repository-relative, optionally with a "#L<line>" anchor). Read them first: a citation that does not exist fails validation and the spec is rejected.`
-      : `\n- "cites" is optional; if present it must name a real file.`;
-
   return [
     `Design ONE interactive for a learner studying "${input.unitTitle}" in the course "${input.courseTitle}".`,
     `Concepts in scope: ${input.concepts.join(", ") || "(none recorded)"}`,
     ``,
     `Reply with ONE fenced json block and nothing else:`,
     "```json",
-    `{ "interactives": [ { "kind": "slider", "fn": "m * x + b", "xRange": [-6, 6], "params": [ { "name": "m", "min": -4, "max": 4, "step": 0.5, "value": 1 } ], "caption": "...", "cites": ["..."] } ] }`,
+    `{ "interactives": [ { "kind": "slider", "fn": "m * x + b", "xRange": [-6, 6], "params": [ { "name": "m", "min": -4, "max": 4, "step": 0.5, "value": 1 } ], "caption": "..." } ] }`,
     "```",
     ``,
     `Rules:`,
@@ -214,7 +187,6 @@ export function buildGenerationPrompt(input: {
     `- Every parameter needs "name", "min", "max", "step", "value", with min < max and a positive step.`,
     `- For a target-window game give "speed" (0.05-5) and "band" as two increasing numbers within 0-100.`,
     `- "caption" is one short instruction to the learner.`,
-    citeRule,
   ].join("\n");
 }
 

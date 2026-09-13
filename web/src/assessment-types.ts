@@ -22,7 +22,6 @@ export interface AssessmentItem {
   accepts: string[];
   hints: string[];
   steps: string[];
-  cites: string[];
 }
 
 export interface AssessmentsResponse {

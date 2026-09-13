@@ -1,7 +1,6 @@
 # Course — Lab Fixture
 
 ```yaml
-kind: codebase
 title: Lab Fixture
 ```
 
@@ -20,7 +19,6 @@ title: Lab Fixture
 - **param:** m | -4 | 4 | 0.5 | 1
 - **param:** b | -4 | 4 | 0.5 | -2
 - **caption:** Drag m to change the slope
-- **cites:** src/slope.ts#L2
 
 ## Game: Launch window
 
@@ -28,4 +26,3 @@ title: Lab Fixture
 - **speed:** 0.9
 - **band:** 44 | 56
 - **caption:** Launch when the marker is inside the band
-- **cites:** src/slope.ts#L1

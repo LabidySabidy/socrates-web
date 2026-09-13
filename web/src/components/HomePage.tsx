@@ -141,7 +141,6 @@ export function HomePage({
               {filtered.map((course) => (
                 <a className="card" key={course.id} href={hrefCourse(course.id)}>
                   <div className="card-head">
-                    <span className="eyebrow subject">{course.kind}</span>
                     <MasteryRing
                       mastery={mastery(aggregateState(course))}
                       size={38}

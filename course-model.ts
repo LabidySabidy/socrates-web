@@ -10,7 +10,7 @@
  *   and already carries mastery.
  *
  *   MANIFEST (optional): COURSE.md declares units, groups, module types, ordering, and
- *   assessment placement, and may override `kind` and `title`.
+ *   assessment placement, and may override the title.
  *
  * Degenerate inputs never throw. Every one of them produces a renderable tree plus a warning,
  * because a broken rail is worse than an honest empty state.
@@ -19,7 +19,7 @@
  */
 import type { Badge, LearningData } from "./learning-parser.ts";
 import { SEVERITIES, severityState, type SeverityState } from "./learning-parser.ts";
-import { courseOracle, validateItems, type AssessmentItem, type CiteOracle, type Quiz } from "./assessments.ts";
+import { validateItems, type AssessmentItem, type Quiz } from "./assessments.ts";
 import { validateSpecs, type Interactive, type Spec } from "./interactives.ts";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,6 @@ export interface CourseTree {
   id: string;
   dir: string;
   title: string;
-  kind: "topic" | "codebase";
   derived: boolean;
   warnings: string[];
   mission: LearningData["mission"];
@@ -284,10 +283,9 @@ export function deriveUnits(src: CourseSource, warnings: string[]): Unit[] {
   });
 }
 
-export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {}): CourseTree {
+export function buildCourse(src: CourseSource): CourseTree {
   const warnings: string[] = [];
   const present = src.data.present;
-  const oracle = opts.oracle ?? courseOracle(src.dir);
 
   if (!present.includes("SCHEMA.md")) warnings.push(WARN.noSchema);
   if (!present.includes("MISSION.md")) warnings.push(WARN.noMission);
@@ -300,7 +298,6 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
   let quizzes: Quiz[] = [];
   let interactives: Interactive[] = [];
   let derived = true;
-  let kind: CourseTree["kind"] = "topic";
   let courseTitle = title;
 
   if (src.manifestText) {
@@ -318,7 +315,6 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
         spec: lab.spec,
       }));
       derived = false;
-      kind = parsed.kind;
       if (parsed.title) courseTitle = parsed.title;
       warnings.push(...parsed.warnings);
     }
@@ -329,8 +325,6 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     const checked: Quiz[] = [];
     for (const quiz of quizzes) {
       const { items, errors } = validateItems(quiz.items, {
-        kind,
-        oracle,
         prefix: `${quiz.id}-q`,
       });
       for (const error of errors) warnings.push(`assessment-invalid:${quiz.id}:${error}`);
@@ -345,8 +339,6 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     const kept: Interactive[] = [];
     for (const interactive of interactives) {
       const { specs, errors } = validateSpecs([interactive.spec], {
-        kind,
-        oracle,
         prefix: `${interactive.id}-i`,
       });
       for (const error of errors) warnings.push(`interactive-invalid:${interactive.id}:${error}`);
@@ -363,7 +355,6 @@ export function buildCourse(src: CourseSource, opts: { oracle?: CiteOracle } = {
     id: src.id,
     dir: src.dir,
     title: courseTitle,
-    kind,
     derived,
     warnings: [...new Set(warnings)],
     mission,
@@ -387,7 +378,6 @@ export interface ManifestResult {
   units: Unit[];
   quizzes: Quiz[];
   interactives: { id: string; title: string; unit: number; spec: Spec }[];
-  kind: CourseTree["kind"];
   title?: string;
   warnings: string[];
 }
@@ -396,7 +386,7 @@ const UNIT_RE = /^##\s+Unit\s+(\d+)\s*:\s*(.+?)\s*$/;
 const GROUP_RE = /^###\s+Group\s*:\s*(.+?)\s*$/;
 const QUIZ_SECTION_RE = /^##\s+Quiz\s*:\s*(.+?)\s*$/;
 const LAB_SECTION_RE = /^##\s+(Interactive|Game)\s*:\s*(.+?)\s*$/;
-const LAB_FIELD_RE = /^\s*-\s+\*\*(kind|fn|caption|param|speed|band|cites|xrange):\*\*\s*(.*)$/i;
+const LAB_FIELD_RE = /^\s*-\s+\*\*(kind|fn|caption|param|speed|band|xrange):\*\*\s*(.*)$/i;
 const QUESTION_RE = /^-\s+\*\*Q\*\*\s+(.*)$/;
 const ITEM_FIELD_RE = /^\s*-\s+\*\*(answer|accepts|hint|step|cite|mode):\*\*\s*(.*)$/i;
 const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z][a-z-]*)`\)\s+(.*)$/;
@@ -408,7 +398,7 @@ const REF_RE = /@([a-z0-9][a-z0-9-]*)/i;
  * invalid manifest fails loudly into `manifest-invalid:<reason>` and the derivation is used
  * instead — a malformed manifest must never produce a half-built tree.
  *
- *   ```yaml            <- optional meta: `kind:` and `title:`
+ *   ```yaml            <- optional meta: `title:`
  *   ## Unit 1: Title    <- unit
  *   > blurb            <- optional unit blurb
  *   ### Group: Name     <- lesson group
@@ -419,7 +409,6 @@ export function parseCourseManifest(
   text: string,
   src: CourseSource,
 ): ManifestResult | { error: string } {
-  const kindMatch = /^kind:\s*(topic|codebase)\s*$/m.exec(text);
   const titleMatch = /^title:\s*(.+?)\s*$/m.exec(text);
 
   const units: Unit[] = [];
@@ -619,7 +608,7 @@ export function parseCourseManifest(
     id: slug(s.title),
     title: s.title,
     unit: s.unit,
-    // Validated in buildCourse, where the course kind and the filesystem are known.
+    // Validated in buildCourse.
     spec: s.raw as unknown as Spec,
   }));
 
@@ -648,7 +637,6 @@ export function parseCourseManifest(
     units,
     quizzes: authoredQuizzes,
     interactives: authoredLabs,
-    kind: kindMatch?.[1] === "codebase" ? "codebase" : "topic",
     title: titleMatch?.[1],
     warnings,
   };

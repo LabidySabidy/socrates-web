@@ -179,3 +179,37 @@ cutover commit, so one `git revert` restores the old UI.
 - Assessments: authored when present, generated and validated otherwise.
 - API: resource routes, no version prefix, `/api/learning` alias.
 - Learning state: event-sourced, log per course.
+
+---
+
+# P16 — A course is a subject: remove codebase courses and the discovery stack
+
+**Direction.** One storage model, one entry point. See the DECISIONS entry for the full rationale and
+the recorded consequence for validation.
+
+**Storage.** `~/.socrates/courses/<slug>/.agent/learning/{MISSION,PLAN,SCHEMA}.md`. The pi session runs
+with `cwd` there, so the learning extensions keep working unchanged. `PROJECT_DIR` and `COURSES_ROOT`
+are deleted. DriftScout's learning directory is migrated as a one-time copy.
+
+**Entry point.** "Start a course" asks for the subject in the learner's own words, creates the course
+directory, and dispatches `/skill:scaffold-learning` through `askHref` — the same mechanism as the
+grill. The tutor interviews; the answers become `MISSION.md`.
+
+**Phases** (one commit each, gates green at every step):
+1. **Remove `kind: codebase` and citations** — model, validation, prompts, UI, fixtures, docs, tests.
+2. **Add the store and the articulate entry point** — additive, so the app works throughout.
+3. **Remove scan / registry / folder browser / T-041 / T-044** and their tests and fixtures.
+
+**Files that will change:** `assessments.ts`, `interactives.ts`, `course-model.ts`, `courses.ts`,
+`server.ts`, `web/src/**`, `docs/CONTENT-MODEL.md`, `DECISIONS.md`, `test/fixtures/**`, all suites.
+
+**Acceptance criteria**
+- [ ] No `codebase` kind, no `cites`, no citation resolution anywhere in the tree.
+- [ ] No `COURSES_ROOT`, no scan, no registry, no `uninitiatedCourses`, no folder browser.
+- [ ] `PROJECT_DIR` and `COURSES_ROOT` absent; `~/.socrates/courses/` is the only store.
+- [ ] Starting a course from the UI creates the directory and dispatches the scaffold skill against a
+      real agent.
+- [ ] Gates green after each commit, with the guard's floors lowered as tests are deleted.
+- [ ] DriftScout's learning directory migrated and rendering.
+
+**Not in scope:** re-adding any path-based course concept in another form.

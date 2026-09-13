@@ -422,7 +422,6 @@ const item = (over: Partial<AssessmentItem> = {}): AssessmentItem => ({
   accepts: [],
   hints: ["h1", "h2", "h3"],
   steps: ["s1", "s2", "s3"],
-  cites: [],
   ...over,
 });
 
@@ -876,8 +875,7 @@ test("check() refuses to auto-grade a self-check item", () => {
     accepts: [],
     hints: ["h"],
     steps: ["s"],
-    cites: [],
-  };
+    };
   let s = initQuiz(1);
   s = setAnswer(s, item.answer);
   const after = check(s, item);
@@ -896,8 +894,7 @@ test("reveal() shows the solution without grading, and judge() is what locks it"
     accepts: [],
     hints: [],
     steps: ["because the policy already exists"],
-    cites: [],
-  };
+    };
   let s = initQuiz(1);
   s = setAnswer(s, "my own words that differ completely");
   s = reveal(s, item);
@@ -925,8 +922,7 @@ test("a self-check verdict counts once toward the attempt and never opens the ga
     accepts: [],
     hints: [],
     steps: ["a"],
-    cites: [],
-  };
+    };
   let s = initQuiz(2);
   s = judge(s, false);
   assert.equal(s.mistakes, 1);
