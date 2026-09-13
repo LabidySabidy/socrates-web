@@ -182,6 +182,22 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   /** Which course the in-flight (or most recent) turn belongs to. */
   let turnCourse: string | null = null;
   /**
+   * T-051 instrumentation. A turn can render its prose and then never settle, and the only way to
+   * tell WHICH handshake branch failed is to log the branches: a subscribe that arrives while
+   * another response still holds the single subscriber slot is refused at 429, and a subscribe that
+   * arrives after the settle gets a replay. Both look identical from the browser — a composer that
+   * never re-enables — so the log is the only thing that separates them.
+   *
+   * `turnSeq` names the turn; a per-response tag names the socket, so a settle can be attributed to
+   * the subscriber that received it (or recorded as having had none).
+   */
+  let turnSeq = 0;
+  let currentTurn = 0;
+  let streamSeq = 0;
+  const stamp = () => new Date().toISOString().slice(11, 23);
+  const hs = (turn: number, msg: string) =>
+    console.log(`[hs t${turn} ${stamp()}] ${msg}`);
+  /**
    * Change notifications get their OWN channel. `/api/stream` carries a chat turn and deliberately
    * allows a single subscriber; a page that only wants to know when a file changed must not have to
    * occupy that slot, and must not be starved of updates because a turn is open elsewhere.
@@ -190,13 +206,21 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const bridge = new ProcessBridge(store);
 
   function finalize(kind: "done" | "error", detail?: unknown): void {
+    const wasSettled = settled;
     settled = true;
     const signal =
       kind === "done"
         ? "data: [DONE]\n\n"
         : `data: [ERROR] ${JSON.stringify({ error: detail ?? "unknown" })}\n\n`;
     const res = activeStream;
+    const heldBy = (res as { __hsTag?: string } | null)?.__hsTag;
     activeStream = null;
+    hs(
+      currentTurn,
+      `SETTLE kind=${kind} alreadySettled=${wasSettled} subscriber=${heldBy ?? "NONE"} ` +
+        `bufferedLines=${turnLines.length}` +
+        (res ? "" : " — [DONE] had nowhere to go"),
+    );
     if (res) {
       try {
         res.write(signal);
@@ -886,6 +910,8 @@ ${BUDAPEST_MODIFIER}` : message;
 
         turnLines = [];
         settled = false;
+        currentTurn = ++turnSeq;
+        hs(currentTurn, `ACCEPT course=${ref.id} via=${killedTurn ? "switch" : "new"} priorSubscriber=${activeStream ? "held" : "none"}`);
         turnCourse = ref.id;
         ensureBridgeWired();
         const accepted = bridge.send({ type: "prompt", message: prompt });
@@ -927,20 +953,32 @@ ${BUDAPEST_MODIFIER}` : message;
         sendJson(res, 409, { error: "a turn for another course is active", activeCourse: turnCourse });
         return;
       }
+      const tag = `s${++streamSeq}`;
+      (res as { __hsTag?: string }).__hsTag = tag;
       if (activeStream) {
+        const held = (activeStream as { __hsTag?: string }).__hsTag;
+        hs(currentTurn, `SUBSCRIBE ${tag} REFUSED 429 — held by ${held ?? "?"}, settled=${settled}`);
         sendJson(res, 429, { error: "an SSE stream is already active" });
         return;
       }
+      hs(currentTurn, `SUBSCRIBE ${tag} accepted — settled=${settled}, replaying ${turnLines.length} line(s)`);
       res.writeHead(200, SSE_HEADERS);
       for (const line of turnLines) res.write(`data: ${line}\n\n`);
       if (settled) {
+        hs(currentTurn, `REPLAY ${tag} settled before subscribing — sending [DONE] and ending`);
         res.write("data: [DONE]\n\n");
         res.end();
         return;
       }
       activeStream = res;
+      hs(currentTurn, `ATTACH ${tag} as the live subscriber`);
       req.on("close", () => {
-        if (activeStream === res) activeStream = null;
+        if (activeStream === res) {
+          activeStream = null;
+          hs(currentTurn, `CLOSE ${tag} released the subscriber slot`);
+        } else {
+          hs(currentTurn, `CLOSE ${tag} (was not the live subscriber)`);
+        }
       });
       return;
     }

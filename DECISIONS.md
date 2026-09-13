@@ -381,3 +381,32 @@ for removal. Migrating course directories in place — rejected; a single store 
 **Tradeoffs:** Courses no longer live beside the code they might be about, and a learner cannot point at
 an existing project. In exchange there is one storage model, one entry point, and no filesystem browsing
 in the API. DriftScout's `.agent/learning` is migrated in as a one-time copy.
+
+## 2026-09-13 — Known gap: the app depends on the developer's local harness (deferred)
+
+**Context:** Socrates-Web drives a real `pi` agent from `~/.pi/agent`, and the learner-facing
+experience depends on things that live there and nowhere else: the `learning` and `passivity`
+extensions (telemetry, SCHEMA/SESSIONS projection, the passivity intercept) and the skills the app
+dispatches by name (`/skill:scaffold-learning`, and the grill family). The server invokes the global
+`pi` binary and inherits that install. Nothing in this repository declares, versions or ships any of
+it, so **the app works as designed only on a machine where this developer's harness is installed at
+`~/.pi/agent`** — a second machine, or a fresh clone, gets a tutor with no telemetry pipeline and no
+`/skill:scaffold-learning` to dispatch.
+
+**Decision:** Accept this as a known gap for now, deliberately, and record it so it is not later
+mistaken for a regression. Packaging and isolation are **deferred**, not overlooked: no
+`PI_CODING_AGENT_DIR` work, no moving the extensions or skills into this repo, no
+`--no-extensions`/`--no-skills` wiring, and no change to how the app selects a model. The reason to
+defer is that it is a substrate swap which does not touch the learning model: the pedagogy, the store
+and the API are the same either way, so it costs nothing to do after the owner has tested and the
+baseline is stable.
+
+**Documented follow-up (the plan, not built):** give the app its own agent home — a repo-owned
+directory passed as `PI_CODING_AGENT_DIR` — containing the `learning` and `passivity` extensions and
+the skills this app dispatches, so a fresh clone runs without a hand-installed harness. That work
+turns the current install into a product, and it is the prerequisite for anyone else running this.
+
+**Alternatives considered:** pinning the extensions into the repo now — rejected as premature while
+the app is still being tested and the extension surface is changing; a startup check that fails
+loudly when `~/.pi/agent` lacks the extensions — cheap and tempting, but it would bake the dependency
+in harder by making the local layout contractual, which is the opposite of the follow-up.

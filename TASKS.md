@@ -413,27 +413,41 @@
       **Wording deliberately unchanged:** it is programming-specific, and rewriting it would be a content
       decision rather than a recovery.
 
-## T-051 — the settle frame can be lost, freezing a tutor turn
+## T-051 — CLOSED as a misdiagnosis: nothing was lost
 
-**Status:** open, reproduced twice on 2026-09-13.
+**Status:** closed 2026-09-13. No defect found; no fix made.
 
-**Symptom.** A real tutor turn renders its prose, then stops. The composer stays disabled forever,
-no further tokens arrive for that page even when a later turn is accepted, and reloading does not
-recover it.
+**What was claimed.** That a long tool-heavy turn rendered its prose and then never settled: the
+composer disabled forever, no tokens for later turns, reload not recovering, while the server
+reported `accepted:true / killedTurn:false` — and that the loss was in the `/api/stream` handshake.
 
-**Evidence.**
-- Client: `document.querySelector(".composer button").disabled === true`, transcript prose frozen at
-  1508 characters for 2+ minutes.
-- Server, at the same moment: `POST /api/chat` → `{"accepted":true,"killedTurn":false}`, i.e. the
-  server considers the previous turn settled. So the loss is in the handshake, not the turn.
-- Triggered by the articulate flow (Start a course → the seeded `/skill:scaffold-learning` turn), and
-  by a tool-heavy turn; a simple Q&A turn in the same course released normally.
+**What the instrument showed.** Per-turn handshake logging (ACCEPT / SUBSCRIBE / ATTACH / SETTLE /
+CLOSE, with turn ids, millisecond timestamps and the subscriber tag) on one long tool-heavy turn:
 
-**Suspected mechanism.** `/api/stream` is single-subscriber: it answers 429 when `activeStream` is
-already set, and only writes `[DONE]` when it is the subscriber that sees the settle. An orphaned
-EventSource therefore either takes the settle frame that belonged to the visible turn or blocks the
-live one at 429, and `EventSource`'s silent auto-retry turns that into an indefinite wait.
+```
+[hs t1 21:57:52.776] ACCEPT course=… priorSubscriber=none
+[hs t1 21:57:52.781] SUBSCRIBE s1 accepted — settled=false, replaying 0 line(s)
+[hs t1 21:57:52.781] ATTACH s1 as the live subscriber
+[hs t1 21:58:06.735] SETTLE kind=done alreadySettled=false subscriber=s1 bufferedLines=1379
+[hs t1 21:58:06.735] CLOSE s1 (was not the live subscriber)
+```
 
-**Fix direction.** Instrument `/api/stream` (log subscribe/replay/settle and the 429 branch) to see
-which of the two branches fires, then decide: make the stream re-attachable per turn, or have the
-client treat a stale stream as a lost turn rather than an open one.
+`SETTLE … subscriber=s1` is the server writing `[DONE]` **to the live subscriber**. The 429 branch
+never fired and no frame was lost. A second turn behaved identically (`t2`, `s2`), and its reply
+rendered.
+
+**The three measurement errors, all mine.**
+1. **`disabled` was read as "busy".** The Send button is `disabled={!canSend}` where
+   `canSend = maySubmit(intercept, input) && !busy && !frozen`, so an empty textarea disables it. Its
+   *label* — `busy ? "Waiting…" : … "Send"` — said `Send` the whole time, i.e. `busy === false`.
+   One attribute was treated as the state; the label that actually names the state was ignored.
+2. **`document.querySelector(".prose")` returns the FIRST match.** After turn 1 settled into the
+   transcript there were two `.prose` elements, so "prose frozen at 1396 characters" was turn 1's
+   message being read over and over. Turn 2's reply was in the second element and rendering fine.
+3. **A turn started by `curl` has no UI subscriber.** The server accepts it, but the browser only
+   opens `/api/stream` when the *page* sends, so "no tokens for a later accepted turn" was expected
+   behaviour, not a lost frame.
+
+**Kept:** the handshake logging. It is five lines per chat turn, carries no message content and no
+paths, and it is what turned a confident two-session diagnosis into a disproved one. A future
+handshake question should start by reading it.
