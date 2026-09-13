@@ -112,6 +112,9 @@
       resolved `#c9c6bd` · unrated neutral. No counts, no repeated beliefs.
       **Done when:** browser-verified against a course whose registry holds duplicate ids (the fixture has
       `MIS-003` ×3) and the tray shows one row; the backend duplicate warning is still emitted but not shown.
+      **Accepted limitation (do not fix unless asked):** resolution outranks severity, so a resolved `root`
+      misconception no longer displays as fundamental. If it ever matters, render resolved rows with the
+      severity dot at low opacity — the stored rating is still in the row and in the event log.
 - [x] **T-022** **Gateway:** confirm the sparser Home (no streaks / levels / ep / badge discs / subject chips) is
       wanted. **Done when:** the user confirms in writing; if not, the scope is updated before T-023.
       **CONFIRMED in writing 2026-09-13** — ship the sparser Home. Every number shown must have a backing field;
