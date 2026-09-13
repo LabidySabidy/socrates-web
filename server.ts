@@ -163,7 +163,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
   }
 
-  if (chatEnabled) {
+  // The bridge is wired on the FIRST chat request, not at boot. Registering a line handler
+  // spawns pi, and a server boot must never spawn a ~1GB agent with cwd set to whatever
+  // PROJECT_DIR points at — that is how an event log full of absolute paths ends up written
+  // into an arbitrary directory. Still registered exactly once, so no listeners accumulate.
+  let bridgeWired = false;
+  function ensureBridgeWired(): void {
+    if (bridgeWired) return;
+    bridgeWired = true;
     bridge.onLine((line) => {
       if (settled) return;
       turnLines.push(line);
@@ -323,7 +330,20 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         }
         resyncWatchers();
         const after = discover();
-        sendJson(res, 200, { ok: true, action, warnings: after.warnings, courses: after.courses });
+        // `unregister` removes the registry entry; the scan can still find the course if it lives
+        // under COURSES_ROOT. Say so rather than leaving the client to wonder why it is still listed.
+        // "Remove it from the catalogue" is `hide` — the reversible one.
+        const stillDiscovered =
+          action === "unregister"
+            ? after.courses.some((c) => resolve(c.dir) === resolve(String(body.dir)))
+            : undefined;
+        sendJson(res, 200, {
+          ok: true,
+          action,
+          ...(stillDiscovered ? { stillDiscovered, hint: "use action 'hide' to remove it from the catalogue" } : {}),
+          warnings: after.warnings,
+          courses: after.courses,
+        });
       } catch (err) {
         sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid body" });
       }
@@ -387,6 +407,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         }
         turnLines = [];
         settled = false;
+        ensureBridgeWired();
         const accepted = bridge.send({ type: "prompt", message });
         sendJson(res, 200, { accepted });
       } catch (err) {

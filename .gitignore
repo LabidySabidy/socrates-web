@@ -22,3 +22,10 @@ LESSONS.md
 
 # Design handoff reference (not shipped; PLAN.md still references it locally)
 docs/handoff-shots/
+
+# Fixture runtime artifacts — created if a test or a real agent runs inside a fixture.
+# Same rule as GL-019: these embed absolute paths and therefore the OS username.
+test/fixtures/**/.agent/learning/events.jsonl
+test/fixtures/**/.agent/learning/SESSIONS/
+test/fixtures/**/.agent/learning/telemetry-errors.log
+test/fixtures/**/.agent/telemetry*

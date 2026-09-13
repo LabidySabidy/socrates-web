@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, type RunningServer } from "./server.ts";
@@ -36,6 +36,44 @@ const getJson = async (url: string) => {
   const res = await fetch(url);
   return { status: res.status, body: await res.json() };
 };
+
+/** Every file under dir, relative to it. */
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  const visit = (current: string, prefix: string) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) visit(join(current, entry.name), rel);
+      else out.push(rel);
+    }
+  };
+  visit(dir, "");
+  return out.sort();
+}
+
+test("booting the server does not spawn pi and never writes into the course", async (t) => {
+  // Regression guard. The bridge used to be wired at boot, which spawned a real agent with
+  // cwd = PROJECT_DIR; the global learning + telemetry extensions then wrote an event log
+  // containing absolute paths straight into the course directory. Booting is now inert:
+  // the bridge is wired on the first chat request only.
+  const before = walk(BASIC);
+  const running = await startServer({
+    port: 0,
+    projectDir: BASIC,
+    coursesRoot: FIXTURES,
+    registryPath: join(BASIC, ".agent", "courses.json"),
+    chat: true, // chat available — just not started
+    watch: false,
+  });
+  t.after(async () => {
+    await running.close();
+    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
+  });
+
+  await new Promise((r) => setTimeout(r, 500)); // give an unwanted spawn time to write
+  assert.deepEqual(walk(BASIC), before, "booting must not touch the course directory");
+  assert.ok(!before.some((f) => f.includes("events.jsonl") || f.includes("telemetry") || f.includes("SESSIONS")));
+});
 
 test("GET /api/courses lists discovered courses with their metadata", async (t) => {
   const { base } = await boot(t);
@@ -173,9 +211,35 @@ test("POST /api/courses registers, hides, and unregisters — touching only the 
   const unregistered = await post({ dir: outsideDir, action: "unregister" });
   assert.equal(unregistered.body.ok, true);
   assert.ok(!unregistered.body.courses.some((c: { id: string }) => c.id === "Outside"));
+  assert.equal(unregistered.body.stillDiscovered, undefined, "outside the scan root, so it is really gone");
 
   // disk is untouched: unregister only edits the registry
   assert.ok(readFileSync(join(outsideDir, ".agent", "learning", "MISSION.md"), "utf8").length > 0);
+});
+
+test("unregistering a scanned course says it is still discoverable, and hide is the real removal", async (t) => {
+  const { base } = await boot(t);
+  const post = async (payload: unknown) => {
+    const res = await fetch(`${base}/api/courses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  const dir = join(FIXTURES, "course-no-mission");
+  await post({ dir }); // register it first so there is something to remove
+  const removed = await post({ dir, action: "unregister" });
+  assert.equal(removed.body.stillDiscovered, true, "the scan re-finds a course under COURSES_ROOT");
+  assert.match(removed.body.hint, /hide/);
+
+  const hidden = await post({ dir, action: "hide" });
+  // discover() returns hidden courses too, flagged — the UI needs them to offer "unhide".
+  assert.equal(hidden.body.courses.find((c: { id: string }) => c.id === "course-no-mission").hidden, true);
+  await post({ dir, action: "unhide" });
+  const back = await post({ dir, action: "unhide" });
+  assert.equal(back.body.courses.find((c: { id: string }) => c.id === "course-no-mission").hidden, false);
 });
 
 test("POST /api/courses rejects a non-course, a missing dir, and an unknown action", async (t) => {

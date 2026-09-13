@@ -131,3 +131,14 @@ GET  /api/learning               -> ALIAS for the default course; shape unchange
 
 `POST` refuses a directory that is not a course (`not a course directory (no .agent/learning)`).
 Unregister edits the registry only — the course on disk is never touched.
+
+### `unregister` vs `hide` — they are not the same thing
+
+| Action | Effect | Reversible |
+|---|---|---|
+| `unregister` | removes the **registry entry**. A course living under `COURSES_ROOT` is then re-found by the scan. | re-register |
+| `hide` | sets `hidden: true` / adds to `ignore`, so it leaves the **catalogue**. | `unhide` |
+
+So "remove this course from the list" is `hide`, not `unregister`. When `unregister` leaves a course still
+discoverable by the scan, the response includes `stillDiscovered: true` and a `hint` — the client should offer
+`hide` rather than appear to have done nothing.
