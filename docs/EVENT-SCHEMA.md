@@ -120,6 +120,29 @@ known 6-column shape containing `Corrected model` and the separator has 6 cells.
 to the header, extends the separator, and pads existing rows with an empty cell. It never removes a
 column and never rewrites cell contents, and it reports `registry-migrated-to-7-columns` in warnings.
 
+## Publication rule — the log must never be published
+
+`events.jsonl` embeds **absolute paths** (`cwd`, `session_file`), and those embed the OS username. It is a
+private runtime artifact, not documentation.
+
+Any repo hosting a course — especially a public one — must ignore the runtime artifacts:
+
+```gitignore
+.agent/learning/events.jsonl
+.agent/learning/SESSIONS/
+.agent/learning/telemetry-errors.log
+```
+
+The source-of-truth files are path-free and safe to commit: `MISSION.md`, `PLAN.md`, `SCHEMA.md`.
+
+**Applied:** `DriftScout` (public repo). It previously ignored only `.agent/telemetry*`, so `events.jsonl`
+and `SESSIONS/` — the two files that carry the account name in every `session_file` — were one `git add .`
+away from publication. Verified after the fix: all three artifacts ignored, and `MISSION.md` / `PLAN.md` /
+`SCHEMA.md` still committable. Nothing was published, so no history rewrite was needed.
+
+Why this matters beyond tidiness: a published log leaks the account name and the local directory layout, and
+scrubbing after a push does not remove it from history.
+
 ## Manual dedupe procedure (misconception registry)
 
 The projection **never deletes a registry row**. A row with an id it already knows is updated in place; rows
