@@ -18,6 +18,8 @@ import {
   uninitiatedCourses,
 } from "./select.ts";
 import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
+import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
+import { courseScrollKey, readPaneScroll, savePaneScroll } from "./scroll.ts";
 import type { CourseRef, LearningData, Misconception } from "./types.ts";
 
 const mis = (over: Partial<Misconception>): Misconception =>
@@ -278,4 +280,69 @@ test("only initiated, unhidden courses reach the catalogue and its count", () =>
     1,
     "the count next to the course list is the catalogue count, not the scan count",
   );
+});
+
+// ---------------------------------------------------------------------------
+// streaming: thinking must never reach the visible prose
+// ---------------------------------------------------------------------------
+
+test("wire thinking and prose are kept apart", () => {
+  let t = emptyTurn();
+  t = reduceTurn(t, { type: "thinking_delta", delta: "the learner assumes " });
+  t = reduceTurn(t, { type: "thinking_delta", delta: "setState is sync" });
+  t = reduceTurn(t, { type: "text_delta", delta: "What does the console print?" });
+  const split = splitTurn(t);
+  assert.equal(split.thinking, "the learner assumes setState is sync");
+  assert.equal(split.prose, "What does the console print?");
+  assert.equal(split.prose.includes("setState is sync"), false, "thinking never leaks into prose");
+  assert.equal(isSilent(t), false);
+});
+
+test("inline <thinking> is moved to the drawer, including across chunk boundaries", () => {
+  let t = emptyTurn();
+  // the tag is split across two deltas — splitting per delta would leak "<thin" into the prose
+  t = reduceTurn(t, { type: "text_delta", delta: "Before <thin" });
+  t = reduceTurn(t, { type: "text_delta", delta: "king>secret</thinking> after" });
+  const split = splitTurn(t);
+  assert.equal(split.thinking, "secret");
+  assert.equal(split.prose, "Before  after");
+  assert.equal(split.prose.includes("secret"), false);
+  assert.equal(split.prose.includes("thinking>"), false);
+});
+
+test("an unterminated <thinking> block is still treated as reasoning while streaming", () => {
+  const t = reduceTurn(emptyTurn(), { type: "text_delta", delta: "<thinking>still arriving" });
+  const split = splitTurn(t);
+  assert.equal(split.prose, "", "nothing visible yet");
+  assert.equal(split.thinking, "still arriving");
+  assert.equal(splitTurn(emptyTurn()).prose, "");
+  assert.equal(isSilent(emptyTurn()), true);
+});
+
+test("a Thinking: line is tucked into the drawer and removed from the prose", () => {
+  const t = reduceTurn(emptyTurn(), {
+    type: "text_delta",
+    delta: "Thinking: maybe they think it is synchronous\nSlope is rise over run.",
+  });
+  const split = splitTurn(t);
+  assert.equal(split.thinking, "maybe they think it is synchronous");
+  assert.equal(split.prose, "Slope is rise over run.");
+});
+
+test("both sources of reasoning are combined, and unknown events are ignored", () => {
+  let t = reduceTurn(emptyTurn(), { type: "thinking_delta", delta: "wire thought" });
+  t = reduceTurn(t, { type: "text_delta", delta: "<thinking>inline thought</thinking>visible" });
+  t = reduceTurn(t, { type: "tool_call", delta: "ignored" });
+  t = reduceTurn(t, undefined);
+  const split = splitTurn(t);
+  assert.equal(split.thinking, "wire thought\n\ninline thought");
+  assert.equal(split.prose, "visible");
+});
+
+test("scroll keys are per course and unit, and absent storage is not fatal", () => {
+  assert.equal(courseScrollKey("alg", 3), "alg:3");
+  assert.equal(courseScrollKey("alg", null), "alg:1");
+  // no window in this environment: both helpers must degrade rather than throw
+  assert.equal(readPaneScroll("alg:3"), null);
+  assert.doesNotThrow(() => savePaneScroll("alg:3", 120));
 });

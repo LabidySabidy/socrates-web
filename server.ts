@@ -20,7 +20,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
-import { dirname, extname, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
@@ -152,7 +152,10 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   let turnLines: string[] = [];
   let settled = true;
   let activeStream: ServerResponse | null = null;
+  /** Which course the in-flight (or most recent) turn belongs to. */
+  let turnCourse: string | null = null;
   const bridge = new ProcessBridge(projectDir);
+  const defaultCourseId = () => basename(resolve(projectDir));
 
   function finalize(kind: "done" | "error", detail?: unknown): void {
     settled = true;
@@ -283,7 +286,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     if (!filePath) return false;
     try {
       const data = await readFile(filePath);
-      res.writeHead(200, { "Content-Type": MIME[extname(filePath).toLowerCase()] ?? "application/octet-stream" });
+      const ext = extname(filePath).toLowerCase();
+      const headers: Record<string, string> = {
+        "Content-Type": MIME[ext] ?? "application/octet-stream",
+      };
+      // index.html must not be cached: it names the hashed asset bundle, so a stale copy keeps
+      // loading the previous build after every rebuild. Hashed assets themselves are immutable.
+      headers["Cache-Control"] = ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable";
+      res.writeHead(200, headers);
       res.end(data);
       return true;
     } catch {
@@ -445,17 +455,48 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         return;
       }
       try {
-        const parsed = JSON.parse((await readBody(req)) || "{}") as { message?: unknown };
+        const parsed = JSON.parse((await readBody(req)) || "{}") as {
+          message?: unknown;
+          course?: unknown;
+        };
         const message = typeof parsed.message === "string" ? parsed.message : "";
         if (!message) {
           sendJson(res, 400, { error: "message required" });
           return;
         }
+
+        // The course decides which directory the tutor runs in, and cwd IS which course it can
+        // read and write. Omitting it keeps the pre-course behaviour: the default course.
+        const result = discover();
+        const wanted = typeof parsed.course === "string" && parsed.course ? parsed.course : null;
+        const ref = wanted ? findCourse(result, wanted) : findCourse(result, defaultCourseId());
+        if (!ref) {
+          sendJson(res, 404, {
+            error: `unknown course: ${wanted ?? defaultCourseId()}`,
+            known: result.courses.map((c) => c.id),
+          });
+          return;
+        }
+        if (!ref.initiated) {
+          sendJson(res, 409, {
+            error: `not initiated (no MISSION.md): ${ref.id}`,
+            hint: "a course must have a mission before a tutor session can run in it",
+          });
+          return;
+        }
+
+        // A switch mid-turn kills the process the tokens are coming from, so surface that on the
+        // live stream instead of leaving the client waiting for output that will never arrive.
+        const killedTurn = !settled;
+        if (killedTurn) finalize("error", `course switched to ${ref.id} mid-turn`);
+        const switched = bridge.switchCourse(ref.dir).switched;
+
         turnLines = [];
         settled = false;
+        turnCourse = ref.id;
         ensureBridgeWired();
         const accepted = bridge.send({ type: "prompt", message });
-        sendJson(res, 200, { accepted });
+        sendJson(res, 200, { accepted, course: ref.id, switched, killedTurn });
       } catch (err) {
         sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid body" });
       }
@@ -465,6 +506,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     if (url === "/api/stream") {
       if (!chatEnabled) {
         sendJson(res, 503, { error: "chat is disabled" });
+        return;
+      }
+      // A stream belongs to one turn. Subscribing to a different course than the active turn
+      // would silently deliver another course's tokens, so refuse instead.
+      const asked = new URL(req.url ?? "/", "http://localhost").searchParams.get("course");
+      if (asked && turnCourse && asked !== turnCourse) {
+        sendJson(res, 409, { error: "a turn for another course is active", activeCourse: turnCourse });
         return;
       }
       if (activeStream) {

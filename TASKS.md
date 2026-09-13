@@ -207,11 +207,28 @@
       null when no course has a journal, when a count has no timestamp, and to pick by recency not volume.
 
 ## P4 — Bridge restart on switch + chat-first lesson
-- [ ] **T-025** `process-bridge.ts` `switchCourse(dir)` — kill tree, warm respawn; mid-turn switch kills the
+- [x] **T-025** `process-bridge.ts` `switchCourse(dir)` — kill tree, warm respawn; mid-turn switch kills the
       stream and surfaces it. **Done when:** tests cover switch-while-idle and switch-while-streaming.
-- [ ] **T-026** `/api/chat` + `/api/stream` accept an optional course selector; unchanged when omitted.
-- [ ] **T-027** Lesson view: EXPLAIN → SHOW → ASK, Socratic Reasoning drawer fed by `thinking_delta`, pinned
+      **Done** — `switchCourse()` terminates without arming the shutdown latch, then warm-spawns. Two real
+      bugs fixed: the old child's `exit` handler nulled `this.child` and orphaned the fresh process, and
+      `kill()`'s latch made a respawn impossible. 3 tests using a cwd-reporting mock assert the process is
+      replaced, that the new one runs in the new directory, that a same-course switch is a no-op, and that a
+      swept bridge still completes a turn.
+- [x] **T-026** `/api/chat` + `/api/stream` accept an optional course selector; unchanged when omitted.
+      **Done** — a prompt carries `course`; the server resolves it, refuses an uninitiated one (409), switches
+      the bridge, and persists `turnCourse` so a stream cannot subscribe to a different course than the live
+      turn (409 with `activeCourse`). A mid-turn switch finalises the live stream with an explicit error
+      rather than leaving the client waiting. 4 integration tests use the mock pi, so no real agent starts.
+- [x] **T-027** Lesson view: EXPLAIN → SHOW → ASK, Socratic Reasoning drawer fed by `thinking_delta`, pinned
       composer, Exit Lesson preserving position. **Done when:** browser-verified streaming real pi output.
+      **Done** — `#/lesson/:courseId/:unit`, opened from tutor-backed module rows (`recite`, `explain`,
+      `ai-activity`); other types keep deferred screens. `web/src/turn.ts` accumulates the stream and splits
+      reasoning from prose over the whole buffer (a tag can straddle chunks) and handles inline
+      `<thinking>`/`Thinking:` too. Exit Lesson returns to the originating unit and restores the pane's scroll
+      offset, saved on the way in. **Browser-verified against a real agent** (see PROGRESS).
+- [x] **T-040** Cache headers: `index.html` must not be cached, hashed assets may be immutable.
+      **Done** — without it a rebuilt bundle is invisible until a hard refresh, which silently invalidated a
+      verification run. Found because the page was still executing a previous asset hash.
 
 ## P5 — Assessments
 - [ ] **T-028** Authored items from `COURSE.md`, else pi-generated under a validated structured contract
@@ -225,6 +242,10 @@
 - [ ] **T-031** Interactive generation through pi for a concept, validated and stored.
 
 ## Backlog — flagged, deliberately not built
+- [ ] **T-041** A "start a course" affordance. A not-initiated directory can only be fixed by authoring
+      `MISSION.md` by hand — there is no UI path and no scaffold flow in the app. Acceptable while the
+      catalogue is small; revisit as it grows. The scaffold skill already knows how to write the three files,
+      so this is a UI affordance over existing behaviour, not new content logic.
 - [ ] **T-034** Derived persistence signal — review cycles survived — rendered as a small tick, never a
       colour. Behaviourally grounded, so honest to derive. **Not to be started without an explicit ask.**
 - [x] **T-037** Client test for the tray + mastery colour mapping, so drift is caught without a browser.

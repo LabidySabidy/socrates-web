@@ -373,6 +373,125 @@ test("chat routes are absent when chat is disabled, and health still answers", a
   assert.equal(await health.text(), "ok");
 });
 
+// ---------------------------------------------------------------------------
+// chat is course-aware — T-026 (uses a mock pi, so no real agent is started)
+// ---------------------------------------------------------------------------
+
+/** Boot with chat enabled and the cwd-reporting mock, so a switch is observable. */
+async function bootChat(t: { after(fn: () => Promise<void> | void): void }) {
+  process.env.PI_BIN = "node";
+  process.env.PI_ARGS = join(import.meta.dirname, "test", "mock-pi-cwd.mjs");
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+  const running = await startServer({
+    port: 0,
+    projectDir: BASIC,
+    coursesRoot: FIXTURES,
+    registryPath: join(BASIC, ".agent", "courses.json"),
+    staticDir,
+    chat: true,
+    watch: false,
+  });
+  t.after(async () => {
+    await running.close();
+    rmSync(join(BASIC, ".agent", "courses.json"), { force: true });
+    rmSync(staticDir, { recursive: true, force: true });
+  });
+  return { base: `http://127.0.0.1:${running.port}` };
+}
+
+/** Read an SSE body to completion and return the data lines. */
+async function readStream(url: string): Promise<{ status: number; lines: string[] }> {
+  const res = await fetch(url);
+  if (res.status !== 200) return { status: res.status, lines: [] };
+  const text = await res.text();
+  return {
+    status: res.status,
+    lines: text
+      .split(String.fromCharCode(10))
+      .filter((l) => l.startsWith("data: "))
+      .map((l) => l.slice(6)),
+  };
+}
+
+test("a prompt without a course keeps the default-course behaviour", async (t) => {
+  const { base } = await bootChat(t);
+  const res = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "where am I" }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.accepted, true);
+  assert.equal(body.course, "course-basic");
+  assert.equal(body.switched, false, "already in the default course");
+
+  const { lines } = await readStream(`${base}/api/stream`);
+  const delta = lines.find((l) => l.includes("cwd:"));
+  assert.ok(delta, "a turn streamed back");
+  assert.match(JSON.parse(delta!).assistantMessageEvent.delta, /course-basic$/);
+});
+
+test("naming another course restarts the agent in that course and the turn reaches it", async (t) => {
+  const { base } = await bootChat(t);
+
+  const res = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "where am I", course: "course-with-journal" }),
+  });
+  const body = await res.json();
+  assert.equal(body.course, "course-with-journal");
+  assert.equal(body.switched, true, "the agent was moved");
+
+  const { lines } = await readStream(`${base}/api/stream?course=course-with-journal`);
+  const delta = lines.find((l) => l.includes("cwd:"));
+  assert.ok(delta);
+  assert.match(
+    JSON.parse(delta!).assistantMessageEvent.delta,
+    /course-with-journal$/,
+    "the turn ran in the named course",
+  );
+});
+
+test("a stream cannot subscribe to a different course than the active turn", async (t) => {
+  const { base } = await bootChat(t);
+  await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "hi", course: "course-basic" }),
+  });
+
+  const wrong = await fetch(`${base}/api/stream?course=course-with-journal`);
+  assert.equal(wrong.status, 409);
+  const body = await wrong.json();
+  assert.equal(body.activeCourse, "course-basic", "it says which course is actually live");
+
+  // draining the real stream lets the server settle before the test ends
+  await readStream(`${base}/api/stream?course=course-basic`);
+});
+
+test("a prompt for an unknown or uninitiated course is refused", async (t) => {
+  const { base } = await bootChat(t);
+  const post = async (course: string) => {
+    const res = await fetch(`${base}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "hi", course }),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  const unknown = await post("nope");
+  assert.equal(unknown.status, 404);
+  assert.ok(Array.isArray(unknown.body.known));
+
+  const uninitiated = await post("course-no-mission");
+  assert.equal(uninitiated.status, 409);
+  assert.match(uninitiated.body.error, /not initiated/);
+});
+
 test("static files are served and path traversal is refused", async (t) => {
   const { base } = await boot(t);
   const index = await fetch(`${base}/`);

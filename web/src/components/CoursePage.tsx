@@ -1,13 +1,17 @@
 /** CoursePage — the two-pane browser: fixed unit rail, independently scrolling module pane. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchCourse, fetchLearning } from "../api.ts";
 import type { CourseRef, CourseTree, LearningData, Unit } from "../types.ts";
 import { MASTERY_STATES, mastery } from "../severity.ts";
-import { hrefCourse, hrefHome } from "../router.ts";
+import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
+import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
 import { JournalPanel } from "./JournalPanel.tsx";
+
+/** Module types that run as a live tutor session. */
+const TUTOR_MODULE_TYPES = new Set(["recite", "explain", "ai-activity"]);
 
 const LEGEND = [
   { label: "Not started", color: "#c9c6bd" },
@@ -29,6 +33,18 @@ export function CoursePage({
   const [tree, setTree] = useState<CourseTree | null>(null);
   const [learning, setLearning] = useState<LearningData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const paneRef = useRef<HTMLElement | null>(null);
+
+  // Exit Lesson saves the pane's scroll position; restore it when we come back to the same unit.
+  useEffect(() => {
+    if (!tree) return;
+    const saved = readPaneScroll(courseScrollKey(courseId, unitNumber ?? 1));
+    if (saved === null) return;
+    const id = requestAnimationFrame(() => {
+      if (paneRef.current) paneRef.current.scrollTop = saved;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [tree, courseId, unitNumber]);
 
   useEffect(() => {
     let alive = true;
@@ -112,7 +128,7 @@ export function CoursePage({
         <MasteryLegend states={LEGEND} />
       </nav>
 
-      <main className="pane">
+      <main className="pane" ref={paneRef}>
         <div className="pane-inner">
           <nav className="crumbs" aria-label="Breadcrumb">
             <a href={hrefHome()}>All courses</a>
@@ -151,8 +167,28 @@ export function CoursePage({
               {selected.groups.map((group) => (
                 <section className="group" key={group.title}>
                   <h2>{group.title}</h2>
-                  {group.modules.map((mod) => (
-                    <div className="mod" key={mod.id}>
+                  {group.modules.map((mod) => {
+                    // Tutor-backed activities open the chat console; other types keep their
+                    // screens deferred (P5/P6), so their rows stay static.
+                    const opensLesson = TUTOR_MODULE_TYPES.has(mod.type);
+                    const Row = opensLesson ? "a" : "div";
+                    return (
+                    <Row
+                      className="mod"
+                      key={mod.id}
+                      {...(opensLesson && selected
+                        ? {
+                            href: hrefLesson(courseId, selected.n),
+                            // Save on the way OUT of the course page: by the time the lesson
+                            // renders, this pane is gone and its scroll offset is unrecoverable.
+                            onClick: () =>
+                              savePaneScroll(
+                                courseScrollKey(courseId, selected.n),
+                                paneRef.current?.scrollTop ?? 0,
+                              ),
+                          }
+                        : {})}
+                    >
                       <ModuleIcon type={mod.type} />
                       <span className="mod-body">
                         <div className="mod-title">{mod.title}</div>
@@ -175,8 +211,9 @@ export function CoursePage({
                           label={`${mod.title}: ${mod.mastery.state}`}
                         />
                       ) : null}
-                    </div>
-                  ))}
+                    </Row>
+                    );
+                  })}
                 </section>
               ))}
             </>

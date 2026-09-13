@@ -11,7 +11,7 @@
  */
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
 
@@ -38,7 +38,8 @@ export class ProcessBridge {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly bin: string;
   private readonly args: string[];
-  private readonly cwd: string;
+  /** Mutable: this IS which course the tutor can read and write. */
+  private cwd: string;
   private cliPath: string | null = null;
   private buffer = "";
   private readonly decoder = new StringDecoder("utf8");
@@ -59,6 +60,11 @@ export class ProcessBridge {
 
   get pid(): number | undefined {
     return this.child?.pid;
+  }
+
+  /** The directory the agent runs in — i.e. the active course. */
+  get courseDir(): string {
+    return this.cwd;
   }
 
   get isBusy(): boolean {
@@ -130,6 +136,10 @@ export class ProcessBridge {
     });
 
     child.on("exit", (code, signal) => {
+      // Only clear the slot if this child is still the current one. A course switch
+      // terminates the old child and immediately spawns a new one; without this guard
+      // the old process's exit would orphan the fresh one by nulling the reference.
+      if (this.child !== child) return;
       this.buffer = "";
       if (this.shuttingDown) return;
       console.error(
@@ -170,9 +180,38 @@ export class ProcessBridge {
 
   kill(): void {
     this.shuttingDown = true;
+    this.terminate();
+  }
+
+  /**
+   * Point the singleton at a different course.
+   *
+   * `cwd` IS which course the tutor can read and write, and pi resolves paths and project trust
+   * against its startup directory, so a switch necessarily means a new process. The new one is
+   * spawned immediately (warm) so the first prompt is not paying for extension loading.
+   *
+   * Per-course conversational context is lost, which is the intended trade: each course's history
+   * lives in its own journal, not in one long-lived agent context.
+   */
+  switchCourse(dir: string): { switched: boolean; from: string; to: string } {
+    const from = this.cwd;
+    if (resolve(from) === resolve(dir)) return { switched: false, from, to: dir };
+    this.terminate();
+    this.cwd = dir;
+    if (!this.shuttingDown) this.ensureSpawned();
+    return { switched: true, from, to: dir };
+  }
+
+  /**
+   * Tear down the child without arming the shutdown latch, so a replacement can be spawned.
+   * `kill()` sets the latch for good; a course switch must not.
+   */
+  private terminate(): void {
     const child = this.child;
+    this.busy = false;
     if (!child) return;
     this.child = null;
+    this.buffer = "";
     // Windows: shell:true puts cmd.exe between us and the node agent, so kill
     // the whole tree synchronously (taskkill /T) to avoid orphaned processes.
     if (process.platform === "win32" && child.pid) {

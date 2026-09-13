@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchCourses } from "./api.ts";
 import type { CoursesResponse } from "./types.ts";
-import { useRoute } from "./router.ts";
+import { hrefCourse, useRoute } from "./router.ts";
 import { catalogueCourses } from "./select.ts";
 import { TopBar } from "./components/TopBar.tsx";
 import { HomePage } from "./components/HomePage.tsx";
 import { CoursePage } from "./components/CoursePage.tsx";
+import { LessonPage } from "./components/LessonPage.tsx";
 
 export function App() {
   const route = useRoute();
@@ -31,7 +32,16 @@ export function App() {
   return (
     <>
       <TopBar courseCount={data ? visible.length : null} />
-      {route.name === "course" ? (
+      {route.name === "lesson" ? (
+        <LessonPage
+          courseId={route.courseId}
+          unitNumber={route.unit}
+          onExit={() => {
+            // Back to the originating unit: the route carries it, so position survives the trip.
+            window.location.hash = hrefCourse(route.courseId, route.unit).slice(1);
+          }}
+        />
+      ) : route.name === "course" ? (
         <CoursePage courseId={route.courseId} unitNumber={route.unit} courses={visible} />
       ) : (
         <HomePage

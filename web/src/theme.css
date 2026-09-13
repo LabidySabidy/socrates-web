@@ -370,3 +370,82 @@ button.primary:hover { background: var(--action-tint); }
 .manage-sub { margin: 20px 0 0; color: var(--ink-45); }
 .manage-hint { font-size: 12px; color: var(--ink-55); margin: 6px 0 0; max-width: 70ch; }
 .manage-list li .manage-name + .manage-src { margin-left: 8px; }
+
+/* ---------------------------------------------------------------- lesson */
+
+.lesson { display: flex; flex-direction: column; height: calc(100% - 60px); min-height: 0; }
+
+.lesson-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--rule);
+}
+.lesson-bar .crumbs { margin: 0; }
+
+.lesson-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 30px 28px 40px; }
+.console { max-width: 680px; margin: 0 auto; }
+.lesson-title { font-size: 34px; margin: 6px 0 22px; line-height: 1.2; }
+
+.reasoning { border-left: 1px solid var(--rule); padding: 2px 0 2px 16px; margin-bottom: 22px; }
+.reasoning summary {
+  cursor: pointer;
+  font-family: var(--reading);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-55);
+  list-style: none;
+}
+.reasoning summary::marker, .reasoning summary::-webkit-details-marker { content: ""; display: none; }
+.reasoning summary::before { content: "▼ "; font-size: 9px; }
+.reasoning[open] summary::before { content: "▲ "; }
+.reasoning-body {
+  font-family: var(--reading);
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--ink-55);
+  white-space: pre-wrap;
+  margin-top: 10px;
+}
+
+.prose {
+  font-size: 16.5px;
+  line-height: 1.85;
+  color: var(--ink);
+  white-space: pre-wrap;
+  margin-bottom: 22px;
+}
+.lesson-intro p { color: var(--ink-70); }
+.presence { font-family: var(--reading); font-style: italic; color: var(--ink-55); font-size: 15px; }
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--rule);
+  padding: 12px 28px;
+  background: var(--paper);
+}
+.composer textarea {
+  flex: 1;
+  font: inherit;
+  font-family: var(--reading);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  resize: none;
+  max-height: 150px;
+  min-height: 42px;
+}
+.composer textarea::placeholder { color: var(--ink-45); }
+.composer textarea:disabled { color: var(--ink-45); }
+
+/* Module rows that open the console afford a link. */
+a.mod { text-decoration: none; color: inherit; }
+a.mod:hover { text-decoration: none; }
