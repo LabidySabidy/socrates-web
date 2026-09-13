@@ -11,7 +11,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseLearning } from "./learning-parser.ts";
 import {
+  AUTHORED_MODULE_TYPES,
   MASTERY_BY_BADGE,
+  MODULE_TYPES,
   MASTERY_STATES,
   aggregateMastery,
   buildCourse,
@@ -217,6 +219,46 @@ test("a malformed manifest falls back to the derivation and says why", () => {
   assert.ok(course.warnings.some((w) => w.includes("unknown module type: telepathy")));
   assert.equal(course.derived, true, "derivation is the safe fallback");
   assert.equal(course.units.length, 3);
+});
+
+test("a manifest can author every module type, including the four added for the taxonomy", () => {
+  const course = buildCourse(load("course-taxonomy"));
+
+  assert.equal(course.derived, false, "the manifest is authoritative");
+  assert.deepEqual(course.warnings, []);
+  const modules = course.units[0].groups[0].modules;
+  assert.deepEqual(
+    modules.map((m) => m.type),
+    [
+      "article",
+      "video",
+      "practice",
+      "quiz",
+      "test",
+      "course-challenge",
+      "primary-source",
+      "faq",
+      "interact",
+      "game",
+      "project",
+      "ai-activity",
+      "recite",
+    ],
+  );
+
+  for (const type of ["course-challenge", "primary-source", "faq", "ai-activity"]) {
+    assert.ok(AUTHORED_MODULE_TYPES.includes(type as never), `${type} is an authored type`);
+    assert.ok(MODULE_TYPES.includes(type as never), `${type} is in the taxonomy`);
+    const mod = modules.find((m) => m.type === type)!;
+    assert.ok(mod, `${type} round-trips from COURSE.md`);
+    assert.ok(mod.title.length > 0, `${type} keeps its authored title`);
+  }
+
+  // an @concept ref still attaches mastery for a newly added type
+  const ai = modules.find((m) => m.type === "ai-activity")!;
+  assert.equal(ai.concept, "taxonomy-card");
+  assert.equal(ai.mastery?.state, "Familiar");
+  assert.equal(ai.missing, undefined);
 });
 
 test("a manifest with no units is invalid rather than silently empty", () => {

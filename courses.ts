@@ -45,6 +45,16 @@ export interface CourseRef {
   masteryCounts: Record<string, number>;
   /** Session recency, parsed from SESSIONS file names — no log reads. */
   sessions: { count: number; lastAt: string | null };
+  /**
+   * A course must have been INITIATED: `.agent/learning/MISSION.md` exists.
+   *
+   * Without this, any project where the learning extension has ever run would count as a course,
+   * because the extension creates the learning directory. Requiring the mission makes the
+   * catalogue reflect what the user actually started, not what the tooling touched.
+   * A not-initiated directory is still returned so the UI can list it and offer to act on it —
+   * it is never silently dropped.
+   */
+  initiated: boolean;
   kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;
@@ -159,11 +169,15 @@ function describe(dir: string): {
   concepts: number;
   masteryCounts: Record<string, number>;
   sessions: { count: number; lastAt: string | null };
+  initiated: boolean;
   kind: CourseRef["kind"];
 } {
   const sessions = sessionIndex(dir);
   try {
     const data = parseLearning(dir);
+    // MISSION.md is the marker of intent. SCHEMA.md alone is not a course: the learning
+    // extension writes it (and the log) wherever a session has run.
+    const initiated = data.present.includes("MISSION.md");
     const manifestPath = join(learningDir(dir), "COURSE.md");
     const kind = existsSync(manifestPath) && /^kind:\s*codebase\s*$/m.test(readFileSync(manifestPath, "utf8"))
       ? "codebase"
@@ -179,10 +193,11 @@ function describe(dir: string): {
       concepts: seen.size,
       masteryCounts,
       sessions,
+      initiated,
       kind,
     };
   } catch {
-    return { title: basename(dir), concepts: 0, masteryCounts: {}, sessions, kind: "topic" };
+    return { title: basename(dir), concepts: 0, masteryCounts: {}, sessions, initiated: false, kind: "topic" };
   }
 }
 
@@ -272,6 +287,7 @@ export function discoverCourses(opts: {
       concepts: details.concepts,
       masteryCounts: details.masteryCounts,
       sessions: details.sessions,
+      initiated: details.initiated,
       kind: details.kind,
       fromScan,
       fromRegistry,
@@ -289,7 +305,17 @@ export function discoverCourses(opts: {
   return { courses, root: root ?? null, warnings };
 }
 
-/** Courses a catalogue should show: everything not hidden. */
+/** Courses a catalogue should show: initiated and not hidden. */
+export function catalogueCourses(result: DiscoveryResult): CourseRef[] {
+  return result.courses.filter((c) => c.initiated && !c.hidden);
+}
+
+/** Directories that look like courses but were never initiated — surfaced, never dropped. */
+export function uninitiatedCourses(result: DiscoveryResult): CourseRef[] {
+  return result.courses.filter((c) => !c.initiated);
+}
+
+/** Everything a catalogue would hide, for a management view. */
 export function visibleCourses(result: DiscoveryResult): CourseRef[] {
   return result.courses.filter((c) => !c.hidden);
 }

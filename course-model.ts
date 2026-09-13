@@ -93,9 +93,13 @@ export const AUTHORED_MODULE_TYPES = [
   "practice",
   "quiz",
   "test",
+  "course-challenge",
+  "primary-source",
+  "faq",
   "interact",
   "game",
   "project",
+  "ai-activity",
 ] as const;
 export const MODULE_TYPES = [...DERIVED_MODULE_TYPES, ...AUTHORED_MODULE_TYPES] as const;
 export type ModuleType = (typeof MODULE_TYPES)[number];
@@ -337,7 +341,7 @@ export interface ManifestResult {
 
 const UNIT_RE = /^##\s+Unit\s+(\d+)\s*:\s*(.+?)\s*$/;
 const GROUP_RE = /^###\s+Group\s*:\s*(.+?)\s*$/;
-const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z]+)`\)\s+(.*)$/;
+const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z][a-z-]*)`\)\s+(.*)$/;
 const QUIZ_RE = /^-\s+\*\*Quiz\*\*\s+(\d+)\s+items?\s*$/;
 const REF_RE = /@([a-z0-9][a-z0-9-]*)/i;
 
@@ -425,8 +429,10 @@ export function parseCourseManifest(
         module.concept = card ? card.name : refMatch![1];
         module.badge = card?.badge;
         module.mastery = card ? masteryOf(card.badge) : MASTERY_UNKNOWN;
-        module.missing = !card;
-        if (card) {
+        // Only set when the reference is dangling: the field means "names a card that does not
+        // exist", so a resolved reference leaves it absent rather than false.
+        if (!card) module.missing = true;
+        else {
           unit.concepts.push(card.name);
           module.due = card.due;
         }

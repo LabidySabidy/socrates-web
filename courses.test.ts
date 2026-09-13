@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  catalogueCourses,
   defaultCoursesRoot,
   discoverCourses,
   findCourse,
@@ -18,6 +19,7 @@ import {
   registryPathFor,
   saveRegistry,
   setHidden,
+  uninitiatedCourses,
   unregisterCourse,
   visibleCourses,
 } from "./courses.ts";
@@ -226,6 +228,40 @@ test("the catalogue counts unique concepts, matching the unit count the course p
 
   const result = discoverCourses({ root, registryPath: join(root, "courses.json") });
   assert.equal(findCourse(result, "Twin")?.concepts, 1, "two cards, one concept");
+});
+
+test("a learning folder without MISSION.md is not an initiated course", (t) => {
+  const root = tmp(t);
+  makeCourse(root, "Real", { concepts: ["a"] });
+  const bare = join(root, "Bare");
+  mkdirSync(join(bare, ".agent", "learning"), { recursive: true });
+  writeFileSync(join(bare, ".agent", "learning", "SCHEMA.md"), "# SCHEMA\n\n### \u2b1c x\n");
+
+  const result = discoverCourses({ root, registryPath: join(root, "courses.json") });
+
+  assert.equal(result.courses.length, 2, "the bare directory is still reported, never dropped");
+  assert.equal(findCourse(result, "Real")?.initiated, true);
+  assert.equal(findCourse(result, "Bare")?.initiated, false);
+
+  assert.deepEqual(catalogueCourses(result).map((c) => c.id), ["Real"]);
+  assert.deepEqual(uninitiatedCourses(result).map((c) => c.id), ["Bare"]);
+  assert.deepEqual(
+    uninitiatedCourses(result).map((c) => c.dir),
+    [bare],
+    "the directory is kept so the UI can explain it",
+  );
+});
+
+test("a hidden initiated course leaves the catalogue but stays uninitiated-free", (t) => {
+  const root = tmp(t);
+  const alpha = makeCourse(root, "Alpha", { concepts: ["a"] });
+  const registryPath = join(root, "courses.json");
+  saveRegistry(registryPath, { version: 1, ignore: [], courses: [{ dir: alpha, hidden: true }] });
+
+  const result = discoverCourses({ root, registryPath });
+  assert.equal(findCourse(result, "Alpha")?.initiated, true);
+  assert.deepEqual(catalogueCourses(result), [], "hidden is excluded from the catalogue");
+  assert.deepEqual(uninitiatedCourses(result), [], "but it is not uninitiated");
 });
 
 test("a manifest declaring codebase kind is reported as such", (t) => {

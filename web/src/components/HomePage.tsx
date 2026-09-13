@@ -102,7 +102,7 @@ export function HomePage({
         <p className="notice">Discovery warnings: {data.warnings.join(", ")}</p>
       ) : null}
 
-      <ManageCourses courses={data.courses} onChanged={onChanged} />
+      <ManageCourses courses={data.courses} root={data.root} onChanged={onChanged} />
 
       {visible.length === 0 ? (
         <div className="empty-note">

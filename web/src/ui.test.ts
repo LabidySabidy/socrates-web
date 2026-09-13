@@ -10,7 +10,14 @@ import assert from "node:assert/strict";
 import { activeCount, trayRows } from "./misconceptions.ts";
 import { SEVERITY_COLOR, SEVERITY_LABEL, MASTERY_STATES, mastery } from "./severity.ts";
 import { memoryStrength } from "./memory.ts";
-import { filterCourses, mostRecent, totalMasteryCounts } from "./select.ts";
+import {
+  catalogueCourses,
+  filterCourses,
+  mostRecent,
+  totalMasteryCounts,
+  uninitiatedCourses,
+} from "./select.ts";
+import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
 import type { CourseRef, LearningData, Misconception } from "./types.ts";
 
 const mis = (over: Partial<Misconception>): Misconception =>
@@ -167,6 +174,7 @@ const course = (over: Partial<CourseRef>): CourseRef =>
     concepts: 0,
     masteryCounts: {},
     sessions: { count: 0, lastAt: null },
+    initiated: true,
     kind: "topic",
     fromScan: true,
     fromRegistry: false,
@@ -219,4 +227,55 @@ test("totalMasteryCounts sums per-state counts across courses and tolerates gaps
     Proficient: 1,
     Mastered: 3,
   });
+});
+
+// ---------------------------------------------------------------------------
+// module taxonomy — vocabulary and rendering, not screens
+// ---------------------------------------------------------------------------
+
+test("every module type has a label and an icon glyph, including the four taxonomy additions", () => {
+  assert.equal(ALL_MODULE_TYPES.length, 16, "12 authored + 4 derived");
+  assert.deepEqual(
+    Object.keys(MODULE_PATHS).sort(),
+    [...ALL_MODULE_TYPES].sort(),
+    "the glyph table is exhaustive, so a new type cannot render blank",
+  );
+  assert.deepEqual(Object.keys(MODULE_LABELS).sort(), [...ALL_MODULE_TYPES].sort());
+
+  for (const type of ALL_MODULE_TYPES) {
+    assert.ok(moduleTypeLabel(type).length > 0, `${type} has a label`);
+    assert.ok(MODULE_PATHS[type].length > 0, `${type} has a glyph`);
+  }
+
+  assert.equal(moduleTypeLabel("course-challenge"), "Course challenge");
+  assert.equal(moduleTypeLabel("primary-source"), "Primary source");
+  assert.equal(moduleTypeLabel("faq"), "FAQ");
+  assert.equal(moduleTypeLabel("ai-activity"), "AI activity");
+
+  // the four additions are distinct from their neighbours in the vocabulary
+  assert.notEqual(MODULE_PATHS["course-challenge"], MODULE_PATHS.test);
+  assert.notEqual(MODULE_PATHS["primary-source"], MODULE_PATHS.article);
+  assert.notEqual(MODULE_PATHS.faq, MODULE_PATHS.quiz);
+  assert.notEqual(MODULE_PATHS["ai-activity"], MODULE_PATHS.recite);
+});
+
+// ---------------------------------------------------------------------------
+// discovery is intentional: a course must be initiated
+// ---------------------------------------------------------------------------
+
+test("only initiated, unhidden courses reach the catalogue and its count", () => {
+  const courses = [
+    course({ id: "real", label: "Real" }),
+    course({ id: "bare", label: "Bare", initiated: false }),
+    course({ id: "hidden", label: "Hidden", hidden: true }),
+  ];
+
+  assert.deepEqual(catalogueCourses(courses).map((c) => c.id), ["real"]);
+  assert.deepEqual(uninitiatedCourses(courses).map((c) => c.id), ["bare"]);
+
+  assert.equal(
+    catalogueCourses(courses).length,
+    1,
+    "the count next to the course list is the catalogue count, not the scan count",
+  );
 });

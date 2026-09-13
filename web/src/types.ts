@@ -12,18 +12,24 @@ export interface Mastery {
 }
 
 export type ModuleType =
+  // derived
   | "recite"
   | "review"
   | "explain"
   | "misconceptions"
+  // authored
   | "article"
   | "video"
   | "practice"
   | "quiz"
   | "test"
+  | "course-challenge"
+  | "primary-source"
+  | "faq"
   | "interact"
   | "game"
-  | "project";
+  | "project"
+  | "ai-activity";
 
 export interface Module {
   id: string;
@@ -91,6 +97,8 @@ export interface CourseRef {
   masteryCounts: Record<MasteryState, number>;
   /** Session recency, from the SESSIONS file names — no log reads. */
   sessions: { count: number; lastAt: string | null };
+  /** A course must have been INITIATED: `.agent/learning/MISSION.md` exists. */
+  initiated: boolean;
   kind: "topic" | "codebase";
   fromScan: boolean;
   fromRegistry: boolean;

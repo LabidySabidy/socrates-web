@@ -160,6 +160,27 @@
       `staticDir`, so `npm test` does not depend on the build having run.
 
 ## P3 — Add-a-course
+- [x] **T-038** Complete the module taxonomy with the four missing types. `course-challenge`, `primary-source`,
+      `faq`, `ai-activity` added to `AUTHORED_MODULE_TYPES`, the manifest parser accepts them (its type group was
+      `[a-z]+`, which rejected hyphenated names), and each has a glyph and a label. **Vocabulary and rendering
+      only** — no FAQ, primary-source, or interact *screens*; those stay deferred per PLAN.md.
+      **Done** — `test/fixtures/course-taxonomy/` authors all 13 types; 2 server tests assert each round-trips
+      from `COURSE.md` (including an `@concept` ref attaching mastery to a new type), and 2 client tests assert
+      every type has a non-empty label and glyph and that the four are distinct from their neighbours. Glyphs and
+      labels moved to `web/src/module-types.ts` so they are testable without a browser. Browser-verified: all 13
+      render in the module pane with icon + label. Fix along the way: a resolved `@concept` ref set
+      `missing: false` instead of leaving it absent.
+- [x] **T-039** Make course discovery intentional — a course requires `MISSION.md`.
+      **Done** — `CourseRef.initiated` is true only when `.agent/learning/MISSION.md` exists. Directories with a
+      learning folder but no mission are excluded from the catalogue grid **and its count**, and listed under
+      "Add or manage" as `not initiated (no MISSION.md)` so nothing is silently dropped. The "Add or manage"
+      panel now shows **"Scanning <root>"** so the count is always explainable. The derivation is unchanged:
+      a mission-less course still loads and still warns `no-mission` (test kept). Registry pin/order/label/hide
+      unchanged.
+      **Verified** — with `COURSES_ROOT=F:/Development` the catalogue shows exactly **1** course (DriftScout,
+      5 concepts) and "Scanning F:/Development"; against a root holding the fixtures plus a bare
+      `.agent/learning` directory, the catalogue shows 9 of 11 refs and "Not initiated (no MISSION.md) · 2"
+      lists `bare-project` and `course-no-mission`.
 - [x] **T-024** "Add course" form → `POST /api/courses`; hide/ignore affordances; no-results state.
       **Done when:** browser-verified — an added course survives a restart; hiding removes it without touching disk.
       **Done** — browser-verified: registering a course outside the scan root from the form wrote the registry

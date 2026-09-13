@@ -114,6 +114,29 @@ test("GET /api/courses lists discovered courses with their metadata", async (t) 
   assert.equal(manifest.kind, "codebase");
 });
 
+test("discovery marks a learning folder without MISSION.md as not initiated", async (t) => {
+  const { base } = await boot(t);
+  const { body } = await getJson(`${base}/api/courses`);
+
+  const bare = body.courses.find((c: { id: string }) => c.id === "course-no-mission");
+  assert.equal(bare.initiated, false, "no MISSION.md means the user never started it");
+  assert.ok(bare.dir, "it is still reported so the UI can explain why it is hidden");
+
+  const real = body.courses.find((c: { id: string }) => c.id === "course-basic");
+  assert.equal(real.initiated, true);
+  // every other fixture carries a mission
+  const uninitiated = body.courses.filter((c: { initiated: boolean }) => !c.initiated);
+  assert.deepEqual(uninitiated.map((c: { id: string }) => c.id), ["course-no-mission"]);
+});
+
+test("a not-initiated course is still loadable — only discovery excludes it", async (t) => {
+  const { base } = await boot(t);
+  const { status, body } = await getJson(`${base}/api/courses/course-no-mission`);
+  assert.equal(status, 200);
+  assert.ok(body.warnings.includes("no-mission"), "the derivation stays graceful");
+  assert.equal(body.units.length, 1);
+});
+
 test("GET /api/courses/:id returns the derived tree", async (t) => {
   const { base } = await boot(t);
   const { status, body } = await getJson(`${base}/api/courses/course-basic`);

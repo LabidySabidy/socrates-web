@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchCourses } from "./api.ts";
 import type { CoursesResponse } from "./types.ts";
 import { useRoute } from "./router.ts";
+import { catalogueCourses } from "./select.ts";
 import { TopBar } from "./components/TopBar.tsx";
 import { HomePage } from "./components/HomePage.tsx";
 import { CoursePage } from "./components/CoursePage.tsx";
@@ -23,7 +24,8 @@ export function App() {
 
   useEffect(load, [load]);
 
-  const visible = (data?.courses ?? []).filter((c) => !c.hidden);
+  // Only initiated courses reach the catalogue and its count; the rest stay in manage.
+  const visible = catalogueCourses(data?.courses ?? []);
   const unknownRoute = route.name === "unknown";
 
   return (

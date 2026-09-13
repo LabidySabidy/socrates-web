@@ -1,12 +1,16 @@
 /**
  * ManageCourses — register a course by directory, and hide / unhide / unregister.
  *
+ * The scan root is shown here so the catalogue count is always explainable: "9 courses" is only
+ * meaningful next to "scanning F:/Development".
+ *
  * Unregister edits the registry only; a course that also lives under the scan root reappears, so
  * the server answers with `stillDiscovered` and we say so instead of appearing to do nothing.
  */
 import { useState } from "react";
 import { postCourse } from "../api.ts";
 import type { CourseRef } from "../types.ts";
+import { uninitiatedCourses } from "../select.ts";
 
 export interface ManageResult {
   kind: "ok" | "error";
@@ -15,9 +19,11 @@ export interface ManageResult {
 
 export function ManageCourses({
   courses,
+  root,
   onChanged,
 }: {
   courses: CourseRef[];
+  root: string | null;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -25,6 +31,8 @@ export function ManageCourses({
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ManageResult | null>(null);
+
+  const uninitiated = uninitiatedCourses(courses);
 
   async function send(body: Parameters<typeof postCourse>[0], okMessage: string) {
     setBusy(true);
@@ -58,6 +66,10 @@ export function ManageCourses({
         </button>
       </div>
 
+      <p className="manage-root eyebrow" data-testid="scan-root">
+        Scanning {root ?? "(no scan root configured)"}
+      </p>
+
       {open ? (
         <div className="manage-body">
           <form
@@ -66,10 +78,7 @@ export function ManageCourses({
               e.preventDefault();
               const trimmed = dir.trim();
               if (!trimmed) return;
-              void send(
-                { dir: trimmed, label: label.trim() || undefined },
-                "Registered",
-              );
+              void send({ dir: trimmed, label: label.trim() || undefined }, "Registered");
             }}
           >
             <label>
@@ -125,6 +134,27 @@ export function ManageCourses({
               </li>
             ))}
           </ul>
+
+          {uninitiated.length > 0 ? (
+            <>
+              <h3 className="eyebrow manage-sub">
+                Not initiated (no MISSION.md) · {uninitiated.length}
+              </h3>
+              <p className="manage-hint">
+                These directories have a learning folder but no mission, so they are not courses and
+                do not appear in the catalogue or its count. A mission is what marks a course as
+                started.
+              </p>
+              <ul className="manage-list">
+                {uninitiated.map((c) => (
+                  <li key={c.id}>
+                    <span className="manage-name">{c.id}</span>
+                    <span className="manage-src eyebrow">not initiated (no MISSION.md)</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </div>
       ) : null}
 
