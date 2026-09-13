@@ -43,3 +43,14 @@ title: Codebase Assessment Fixture
   - **step:** The on clause names the table.
   - **step:** public.locations, so the table is locations.
   - **cite:** src/migrations/001_policy.sql#L2
+
+- **Q** In your own words, why does re-running the policy statement fail, and what does the guard do about it?
+  - **mode:** self-check
+  - **answer:** Creating a policy whose name already exists raises an error, so the guard removes any existing policy of that name before the create runs; the create then succeeds on every run.
+  - **hint:** Think about what the database already has on the second run.
+  - **hint:** The guard is a drop-if-exists.
+  - **hint:** Order matters — drop first, then create.
+  - **step:** On a second run the policy already exists, so CREATE POLICY raises an error.
+  - **step:** DROP POLICY IF EXISTS removes it when present and does nothing when absent.
+  - **step:** The create then runs on a clean slate, so the migration is repeatable.
+  - **cite:** src/migrations/001_policy.sql#L2

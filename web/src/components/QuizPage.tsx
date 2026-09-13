@@ -17,8 +17,10 @@ import {
   check as checkAnswer,
   dismissGate,
   initQuiz,
+  judge,
   next as nextItem,
   restart,
+  reveal,
   score,
   setAnswer,
   showHint,
@@ -26,6 +28,7 @@ import {
   tryAgain,
   type QuizState,
 } from "../quiz.ts";
+import { gradingMode } from "../assessment-types.ts";
 
 export function QuizPage({
   courseId,
@@ -75,7 +78,8 @@ export function QuizPage({
 
   const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? null;
   const item = data?.items[state.index];
-  const label = data && data.items.length > 0 ? actionLabel(state) : null;
+  const selfCheck = item ? gradingMode(item) === "self-check" : false;
+  const label = data && data.items.length > 0 ? actionLabel(state, item) : null;
 
   // Toasts auto-dismiss, matching the reference's 5s quiz toast.
   useEffect(() => {
@@ -146,6 +150,10 @@ export function QuizPage({
   function primary() {
     if (!item) return;
     switch (label) {
+      case "Show solution":
+        // Self-check: reveal, never grade. The learner decides.
+        setState((s) => reveal(s, item));
+        return;
       case "Check":
         setState((s) => checkAnswer(s, item));
         return;
@@ -306,24 +314,57 @@ export function QuizPage({
           <h1 className="display quiz-prompt">{item?.prompt}</h1>
 
           <div className="quiz-input-row">
-            <input
-              className={`quiz-input${state.wrong ? " wrong" : ""}${state.locked ? " locked" : ""}`}
-              value={state.answer}
-              onChange={(e) => setState((s) => setAnswer(s, e.target.value))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") primary();
-              }}
-              placeholder="Answer"
-              aria-label="Your answer"
-              disabled={state.locked}
-            />
+            {selfCheck ? (
+              <textarea
+                className={`quiz-input quiz-prose${state.locked ? " locked" : ""}`}
+                value={state.answer}
+                onChange={(e) => setState((s) => setAnswer(s, e.target.value))}
+                placeholder="Write your answer in your own words, then compare it with the solution"
+                aria-label="Your answer"
+                rows={3}
+                disabled={state.locked}
+              />
+            ) : (
+              <input
+                className={`quiz-input${state.wrong ? " wrong" : ""}${state.locked ? " locked" : ""}`}
+                value={state.answer}
+                onChange={(e) => setState((s) => setAnswer(s, e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") primary();
+                }}
+                placeholder="Answer"
+                aria-label="Your answer"
+                disabled={state.locked}
+              />
+            )}
           </div>
 
-          {state.locked && item ? (
-            <div className="quiz-solution">
-              <button type="button" className="link" onClick={() => setState((s) => showSolution(s))}>
-                See a step-by-step solution
+          {selfCheck ? (
+            <p className="eyebrow quiz-selfcheck">
+              Not auto-graded — this one is prose, so you judge it. Comparing your answer with the
+              solution is the exercise.
+            </p>
+          ) : null}
+
+          {selfCheck && state.solutionOpen && !state.locked && item ? (
+            <div className="quiz-verdict" role="group" aria-label="Your own verdict">
+              <span className="eyebrow">How did you do?</span>
+              <button type="button" className="primary" onClick={() => setState((s) => judge(s, true))}>
+                I got it right
               </button>
+              <button type="button" onClick={() => setState((s) => judge(s, false))}>
+                I didn&rsquo;t get it
+              </button>
+            </div>
+          ) : null}
+
+          {(state.locked || state.solutionOpen) && item ? (
+            <div className="quiz-solution">
+              {state.locked && !state.solutionOpen ? (
+                <button type="button" className="link" onClick={() => setState((s) => showSolution(s))}>
+                  See a step-by-step solution
+                </button>
+              ) : null}
               {state.solutionOpen ? (
                 <ol className="steps">
                   {item.steps.map((step, i) => (
@@ -373,7 +414,12 @@ export function QuizPage({
             Skip
           </button>
         ) : null}
-        <button type="button" className="primary" onClick={primary} disabled={!state.locked && state.answer.trim() === ""}>
+        <button
+          type="button"
+          className="primary"
+          onClick={primary}
+          disabled={!state.locked && !selfCheck && state.answer.trim() === ""}
+        >
           {label}
         </button>
       </div>

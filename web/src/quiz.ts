@@ -8,7 +8,7 @@
  *   - the two-mistake mastery gate opens on the second mistake in an attempt, offering
  *     "Start over" (a full reset) or "Keep going" (dismiss)
  */
-import { isCorrect, type AssessmentItem } from "./assessment-types.ts";
+import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.ts";
 
 export type DotState = "right" | "wrong" | "current" | "pending";
 export type Feedback = "none" | "correct" | "incorrect";
@@ -60,6 +60,8 @@ export function setAnswer(state: QuizState, value: string): QuizState {
 /** Check the current answer. Correct locks the item; wrong records a mistake and may open the gate. */
 export function check(state: QuizState, item: AssessmentItem | undefined): QuizState {
   if (!item || state.locked || state.done) return state;
+  // Never auto-grade prose. A self-check item is revealed and judged by the learner instead.
+  if (gradingMode(item) === "self-check") return state;
   if (state.answer.trim() === "") return state;
 
   if (isCorrect(item, state.answer)) {
@@ -82,6 +84,38 @@ export function check(state: QuizState, item: AssessmentItem | undefined): QuizS
     // The gate opens on the second mistake, and only while the item is still unsolved.
     gateOpen: mistakes >= MISTAKE_LIMIT,
     dots: withDot(state.dots, state.index, "wrong"),
+  };
+}
+
+/**
+ * Self-check: reveal the worked solution WITHOUT grading anything. The learner compares their prose
+ * against it and says how they did.
+ */
+export function reveal(state: QuizState, item: AssessmentItem | undefined): QuizState {
+  if (!item || state.locked || state.done) return state;
+  if (gradingMode(item) !== "self-check") return state;
+  return { ...state, solutionOpen: true };
+}
+
+/**
+ * The learner's own verdict on a self-check item. This is the only thing that locks it.
+ *
+ * One verdict per item by construction: the solution has been revealed, so re-judging would be
+ * meaningless. That means the per-item mastery gate cannot open on a self-check item — a wrong
+ * verdict still counts toward the attempt's total, which is what the mastery mapping reads.
+ */
+export function judge(state: QuizState, correct: boolean): QuizState {
+  if (state.locked || state.done) return state;
+  const mistakes = correct ? state.mistakes : state.mistakes + 1;
+  return {
+    ...state,
+    locked: true,
+    wrong: !correct,
+    mistakes,
+    totalMistakes: state.totalMistakes + (correct ? 0 : 1),
+    feedback: correct ? "correct" : "incorrect",
+    gateOpen: !correct && mistakes >= MISTAKE_LIMIT,
+    dots: withDot(state.dots, state.index, correct ? "right" : "wrong"),
   };
 }
 
@@ -132,8 +166,12 @@ export function dismissGate(state: QuizState): QuizState {
 }
 
 /** Which action the sticky footer's primary button offers. */
-export function actionLabel(state: QuizState): "Check" | "Try again" | "Next" | "Finish" {
+export function actionLabel(
+  state: QuizState,
+  item?: AssessmentItem,
+): "Check" | "Try again" | "Next" | "Finish" | "Show solution" {
   if (state.locked) return state.index + 1 >= state.count ? "Finish" : "Next";
+  if (item && gradingMode(item) === "self-check") return "Show solution";
   if (state.wrong) return "Try again";
   return "Check";
 }

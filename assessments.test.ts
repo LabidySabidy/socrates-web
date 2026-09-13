@@ -8,7 +8,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AUTO_GRADE_MAX_CHARS,
   MISTAKE_LIMIT,
+  isAutoGradable,
   awardedBadge,
   badgeState,
   buildGenerationPrompt,
@@ -80,6 +82,68 @@ test("badgeState names the five states and nothing else", () => {
   assert.equal(badgeState("🟨"), "Familiar");
   assert.equal(badgeState("⬜"), "Not started");
   assert.equal(badgeState("?"), "Not started", "an unknown badge reads as not started");
+});
+
+// ---------------------------------------------------------------------------
+// P8 — the grading contract
+// ---------------------------------------------------------------------------
+
+test("a short answer may be auto-graded; a long one may not", () => {
+  assert.equal(isAutoGradable("3"), true);
+  assert.equal(isAutoGradable("select"), true);
+  assert.equal(isAutoGradable("status = 'approved'"), true);
+  assert.equal(isAutoGradable("DROP POLICY IF EXISTS"), true, "five words is still a checkable term");
+
+  assert.equal(isAutoGradable("The CREATE POLICY statement fails; guard it by dropping it first."), false);
+  assert.equal(isAutoGradable("one two three four five six seven"), false, "over the word limit");
+  assert.equal(isAutoGradable("x".repeat(AUTO_GRADE_MAX_CHARS + 1)), false, "over the character limit");
+  assert.equal(isAutoGradable("First sentence. Second sentence."), false, "two sentences is prose");
+  assert.equal(isAutoGradable("   "), false);
+});
+
+test("a long answer is REJECTED as short-answer, with an error naming the fix", () => {
+  const prose = "The CREATE POLICY statement fails; guard it by dropping it first before recreating it.";
+  const r = validateItem({ ...goodItem, answer: prose }, { id: "q", kind: "topic", oracle: noOracle });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /answer-too-long-for-auto-grading/);
+});
+
+test("the same long answer is accepted once it declares itself a self-check", () => {
+  const prose = "The CREATE POLICY statement fails; guard it by dropping it first before recreating it.";
+  const r = validateItem(
+    { ...goodItem, answer: prose, mode: "self-check" },
+    { id: "q", kind: "topic", oracle: noOracle },
+  );
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.item.mode, "self-check");
+    assert.equal(r.item.answer, prose, "the model answer is kept: it IS the solution");
+  }
+});
+
+test("mode defaults to short-answer, and any other value is not a mode", () => {
+  const plain = validateItem(
+    { ...goodItem, mode: "whatever" },
+    { id: "q", kind: "topic", oracle: noOracle },
+  );
+  assert.equal(plain.ok, true);
+  if (plain.ok) assert.equal(plain.item.mode, "short-answer", "an unknown mode falls back to the safe default");
+});
+
+test("the generation prompt demands short answers and documents the self-check escape", () => {
+  const prompt = buildGenerationPrompt({
+    courseTitle: "C",
+    unitTitle: "U",
+    kind: "topic",
+    concepts: ["a"],
+    count: 2,
+  });
+  assert.match(prompt, /MUST be short and checkable/);
+  assert.match(prompt, /at most 6 words/);
+  assert.match(prompt, /"mode": "self-check"/);
+  assert.match(prompt, /would mark correct paraphrases wrong/);
+  assert.match(prompt, /"mode": "short-answer"/);
+  assert.match(prompt, /"mode": "short-answer", "answer"/, "the JSON example shows the field");
 });
 
 // ---------------------------------------------------------------------------

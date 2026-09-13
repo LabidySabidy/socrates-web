@@ -398,7 +398,7 @@ const QUIZ_SECTION_RE = /^##\s+Quiz\s*:\s*(.+?)\s*$/;
 const LAB_SECTION_RE = /^##\s+(Interactive|Game)\s*:\s*(.+?)\s*$/;
 const LAB_FIELD_RE = /^\s*-\s+\*\*(kind|fn|caption|param|speed|band|cites|xrange):\*\*\s*(.*)$/i;
 const QUESTION_RE = /^-\s+\*\*Q\*\*\s+(.*)$/;
-const ITEM_FIELD_RE = /^\s*-\s+\*\*(answer|accepts|hint|step|cite):\*\*\s*(.*)$/i;
+const ITEM_FIELD_RE = /^\s*-\s+\*\*(answer|accepts|hint|step|cite|mode):\*\*\s*(.*)$/i;
 const MODULE_RE = /^-\s+\*\*Module\*\*\s+\(`([a-z][a-z-]*)`\)\s+(.*)$/;
 const QUIZ_RE = /^-\s+\*\*Quiz\*\*\s+(\d+)\s+items?\s*$/;
 const REF_RE = /@([a-z0-9][a-z0-9-]*)/i;
@@ -432,7 +432,15 @@ export function parseCourseManifest(
 
   // Authored quiz items are collected as raw text here and validated by buildCourse, so an
   // invalid authored item fails the same gate a generated one does.
-  type RawItem = { prompt: string; answer?: string; accepts: string[]; hints: string[]; steps: string[]; cites: string[] };
+  type RawItem = {
+    prompt: string;
+    answer?: string;
+    mode?: string;
+    accepts: string[];
+    hints: string[];
+    steps: string[];
+    cites: string[];
+  };
   let quiz: { title: string; unit: number; items: RawItem[] } | null = null;
   const sections: { title: string; unit: number; items: RawItem[] }[] = [];
   let item: RawItem | null = null;
@@ -494,6 +502,7 @@ export function parseCourseManifest(
       const key = field[1].toLowerCase();
       const value = field[2].trim();
       if (key === "answer") item.answer = value;
+      else if (key === "mode") item.mode = value;
       else if (key === "accepts") item.accepts.push(...value.split("|").map((v) => v.trim()).filter(Boolean));
       else if (key === "hint") item.hints.push(value);
       else if (key === "step") item.steps.push(value);

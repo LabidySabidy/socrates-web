@@ -19,10 +19,38 @@ import { dirname, join } from "node:path";
 // Shapes
 // ---------------------------------------------------------------------------
 
+/**
+ * How an item is graded.
+ *
+ * `short-answer` is auto-graded, which is only safe for an answer a learner can be expected to
+ * reproduce exactly: a value, a term, a number, an identifier. Anything longer cannot be checked
+ * against a list of accepted phrasings, and a paraphrase would be marked WRONG — a false negative,
+ * which is worse than a false positive in a learning tool because it punishes a correct answer.
+ *
+ * `self-check` reveals the worked solution and lets the learner judge their own prose. It is never
+ * auto-marked.
+ */
+export type GradingMode = "short-answer" | "self-check";
+
+/** Limits for an auto-graded answer. Above either one, the item must be a self-check. */
+export const AUTO_GRADE_MAX_WORDS = 6;
+export const AUTO_GRADE_MAX_CHARS = 60;
+
+/** True when an answer is short enough that exact-ish comparison is fair. */
+export function isAutoGradable(answer: string): boolean {
+  const trimmed = answer.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > AUTO_GRADE_MAX_CHARS) return false;
+  if (trimmed.split(/\s+/).filter(Boolean).length > AUTO_GRADE_MAX_WORDS) return false;
+  // More than one sentence is prose, however short.
+  return !/[.!?]\s+\S/.test(trimmed);
+}
+
 export interface AssessmentItem {
   id: string;
   prompt: string;
   answer: string;
+  mode: GradingMode;
   /** Alternative accepted answers, e.g. an equivalent spelling or unit. */
   accepts: string[];
   hints: string[];
@@ -45,6 +73,8 @@ export interface CiteOracle {
 }
 
 export const WARN = {
+  answerTooLong: (words: number, chars: number) =>
+    `answer-too-long-for-auto-grading:${words}-words-${chars}-chars-use-self-check`,
   needsCite: "item-missing-citation",
   badCite: (c: string) => `citation-not-found:${c}`,
   badLine: (c: string, n: number) => `citation-line-out-of-range:${c}#L${n}`,
@@ -172,6 +202,19 @@ export function validateItem(
   if (hints.length === 0) return { ok: false, error: WARN.noHints };
   if (steps.length === 0) return { ok: false, error: WARN.noSteps };
 
+  // Grading mode. Default is auto-graded, but ONLY short answers may claim it: a long answer
+  // auto-graded against a list of phrasings marks correct paraphrases wrong.
+  const mode: GradingMode = r.mode === "self-check" ? "self-check" : "short-answer";
+  if (mode === "short-answer" && !isAutoGradable(answer)) {
+    return {
+      ok: false,
+      error: WARN.answerTooLong(
+        answer.split(/\s+/).filter(Boolean).length,
+        answer.length,
+      ),
+    };
+  }
+
   // Citations are validated on both course kinds, but only required for a codebase course.
   const citeProblems = cites.map((c) => checkCite(c, ctx.oracle)).filter((e): e is string => e !== null);
   if (citeProblems.length > 0) return { ok: false, error: citeProblems[0] };
@@ -179,7 +222,7 @@ export function validateItem(
 
   return {
     ok: true,
-    item: { id: ctx.id, prompt, answer, accepts, hints, steps, cites },
+    item: { id: ctx.id, prompt, answer, mode, accepts, hints, steps, cites },
   };
 }
 
@@ -256,12 +299,14 @@ export function buildGenerationPrompt(input: {
     ``,
     `Reply with ONE fenced json block and nothing else:`,
     "```json",
-    `{ "items": [ { "prompt": "...", "answer": "...", "accepts": ["..."], "hints": ["...", "...", "..."], "steps": ["...", "...", "..."], "cites": ["..."] } ] }`,
+    `{ "items": [ { "prompt": "...", "mode": "short-answer", "answer": "...", "accepts": ["..."], "hints": ["...", "...", "..."], "steps": ["...", "...", "..."], "cites": ["..."] } ] }`,
     "```",
     ``,
     `Rules:`,
     `- "prompt" asks exactly one question and is self-contained.`,
-    `- "answer" is short and checkable. Put equivalent phrasings in "accepts".`,
+    `- "answer" MUST be short and checkable: a value, a term, a number, or an identifier, at most 6 words. Put spelling and formatting variants in "accepts" — not paraphrases.`,
+    `- If the concept genuinely needs a prose answer, set "mode": "self-check" and put the model answer in "answer". Those items are NOT auto-graded: the learner compares against your solution and judges their own work. A long answer WITHOUT "mode": "self-check" is rejected, because auto-grading it would mark correct paraphrases wrong.`,
+    `- Otherwise set "mode": "short-answer" (the default).`,
     `- "hints" must be progressive: 3 short hints that narrow the answer without giving it away.`,
     `- "steps" is the full worked solution, in order.`,
     `- Do NOT include the answer inside "hints".`,

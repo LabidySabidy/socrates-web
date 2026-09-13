@@ -20,7 +20,7 @@ import {
 } from "./select.ts";
 import { ALL_MODULE_TYPES, MODULE_LABELS, MODULE_PATHS, moduleTypeLabel } from "./module-types.ts";
 import { emptyTurn, isSilent, reduceTurn, splitTurn } from "./turn.ts";
-import { isCorrect, type AssessmentItem } from "./assessment-types.ts";
+import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.ts";
 import { completionView } from "./completion.ts";
 import { compile, sample } from "./expr.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
@@ -30,8 +30,10 @@ import {
   check,
   dismissGate,
   initQuiz,
+  judge,
   next as nextItem,
   restart,
+  reveal,
   score,
   setAnswer,
   showHint,
@@ -392,6 +394,7 @@ const item = (over: Partial<AssessmentItem> = {}): AssessmentItem => ({
   id: "q1",
   prompt: "p",
   answer: "3",
+  mode: "short-answer",
   accepts: [],
   hints: ["h1", "h2", "h3"],
   steps: ["s1", "s2", "s3"],
@@ -798,4 +801,129 @@ test("expr.ts imports nothing and touches no browser global", () => {
 
   assert.equal(/^\s*import\s/m.test(code), false, "expr.ts imports nothing, so it has no dependencies");
   assert.equal(/^\s*export\s+default/m.test(code), false, "no default export that could carry state");
+});
+
+// ---------------------------------------------------------------------------
+// P8 — the grading contract
+// ---------------------------------------------------------------------------
+
+test("normalisation folds case, whitespace, quotes and trailing punctuation", () => {
+  // The real bug: a correct paraphrase was marked wrong. These are the presentation differences
+  // that must NOT decide an answer.
+  assert.equal(isCorrect({ answer: "select", accepts: [] }, "SELECT."), true);
+  assert.equal(isCorrect({ answer: "select", accepts: [] }, "  select  "), true);
+  assert.equal(isCorrect({ answer: "status = 'approved'", accepts: [] }, "STATUS  =  'APPROVED'"), true);
+  assert.equal(isCorrect({ answer: "locations", accepts: [] }, "\u201clocations\u201d"), true, "curly quotes");
+  assert.equal(isCorrect({ answer: "drop policy", accepts: [] }, "'drop policy'"), true, "surrounding quotes");
+  assert.equal(isCorrect({ answer: "3", accepts: [] }, "3."), true);
+});
+
+test("normalisation keeps internal punctuation, so wrong answers stay wrong", () => {
+  // Over-normalising would trade a false negative for a false positive, which is worse.
+  assert.equal(isCorrect({ answer: "status = 'approved'", accepts: [] }, "status approved"), false);
+  assert.equal(isCorrect({ answer: "drop policy if exists", accepts: [] }, "drop policy exists"), false);
+  assert.equal(isCorrect({ answer: "select", accepts: [] }, "insert"), false);
+});
+
+test("a short-answer item auto-grades a differently-presented correct answer", () => {
+  const item = { answer: "status = 'approved'", accepts: ["status='approved'"], mode: "short-answer" as const };
+  assert.equal(isCorrect(item, "status = 'approved'."), true);
+  assert.equal(isCorrect(item, "  STATUS='approved'  "), true, "via accepts, without spaces");
+  assert.equal(isCorrect(item, "status = 'pending'"), false);
+});
+
+test("a self-check item never auto-grades, however exact the match", () => {
+  const item = {
+    answer: "The CREATE POLICY statement fails; guard it by dropping it first.",
+    accepts: [],
+    mode: "self-check" as const,
+  };
+  assert.equal(isCorrect(item, item.answer), false, "even the verbatim answer is not graded here");
+  assert.equal(gradingMode(item), "self-check");
+  assert.equal(gradingMode({}), "short-answer", "an absent mode defaults to auto-graded");
+});
+
+test("check() refuses to auto-grade a self-check item", () => {
+  const item = {
+    id: "q",
+    prompt: "why?",
+    answer: "because the policy already exists",
+    mode: "self-check" as const,
+    accepts: [],
+    hints: ["h"],
+    steps: ["s"],
+    cites: [],
+  };
+  let s = initQuiz(1);
+  s = setAnswer(s, item.answer);
+  const after = check(s, item);
+  assert.equal(after.locked, false, "nothing was graded");
+  assert.equal(after.mistakes, 0, "and no mistake was recorded against the learner");
+  assert.equal(after.feedback, "none");
+  assert.equal(after, s, "the state is returned untouched");
+});
+
+test("reveal() shows the solution without grading, and judge() is what locks it", () => {
+  const item = {
+    id: "q",
+    prompt: "why?",
+    answer: "because the policy already exists",
+    mode: "self-check" as const,
+    accepts: [],
+    hints: [],
+    steps: ["because the policy already exists"],
+    cites: [],
+  };
+  let s = initQuiz(1);
+  s = setAnswer(s, "my own words that differ completely");
+  s = reveal(s, item);
+  assert.equal(s.solutionOpen, true);
+  assert.equal(s.locked, false, "revealing is not grading");
+  assert.equal(actionLabel(s, item), "Show solution");
+
+  s = judge(s, true);
+  assert.equal(s.locked, true);
+  assert.equal(s.feedback, "correct");
+  assert.equal(s.dots[0], "right");
+  assert.equal(actionLabel(s, item), "Finish");
+  assert.equal(judge(s, false).locked, true, "a locked item cannot be re-judged");
+});
+
+test("a self-check verdict counts once toward the attempt and never opens the gate", () => {
+  // One verdict per item: the solution has been revealed, so re-judging is meaningless and the
+  // PER-ITEM gate (two mistakes on one attempt) cannot open here. The verdict still counts toward
+  // the attempt's total, which is what the mastery mapping reads.
+  const item = {
+    id: "q",
+    prompt: "p",
+    answer: "a",
+    mode: "self-check" as const,
+    accepts: [],
+    hints: [],
+    steps: ["a"],
+    cites: [],
+  };
+  let s = initQuiz(2);
+  s = judge(s, false);
+  assert.equal(s.mistakes, 1);
+  assert.equal(s.totalMistakes, 1, "the attempt's tally counts it");
+  assert.equal(s.gateOpen, false);
+  assert.equal(s.dots[0], "wrong");
+  assert.equal(s.feedback, "incorrect");
+
+  assert.equal(judge(s, false), s, "a judged item cannot be judged again");
+  assert.equal(judge(s, true).feedback, "incorrect", "nor re-judged as right");
+  assert.equal(judge(s, true).totalMistakes, 1, "and cannot double-count");
+
+  assert.equal(reveal(s, item), s, "nor re-revealed after judging");
+});
+
+test("a short-answer item still offers Check, and a self-check offers Show solution", () => {
+  const short = { mode: "short-answer" as const } as AssessmentItem;
+  const prose = { mode: "self-check" as const } as AssessmentItem;
+  const fresh = initQuiz(2);
+  assert.equal(actionLabel(fresh, short), "Check");
+  assert.equal(actionLabel(fresh, prose), "Show solution");
+  assert.equal(actionLabel(fresh), "Check", "no item means the default label");
+  assert.equal(canSkip(fresh), true, "Skip is available on a self-check item too");
 });

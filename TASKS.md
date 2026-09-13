@@ -271,6 +271,22 @@
       never a partially rendered lab.
 
 ## Backlog — flagged, deliberately not built
+- [x] **T-045** P8 — fix the generated-item grading contract (false negatives on correct answers).
+      **Done** — items carry a `mode`. `short-answer` (default) is auto-graded and REQUIRES an answer of
+      ≤ 6 words, ≤ 60 chars, and not more than one sentence; a longer answer without `mode: self-check` is
+      **rejected** with `answer-too-long-for-auto-grading:<w>-words-<c>-chars-use-self-check`. `self-check`
+      reveals the worked solution and the learner judges their own prose — never auto-marked. Authored items
+      obey the same rule (a long one without `- **mode:** self-check` is dropped with that warning). The
+      generation prompt now demands short checkable answers, explains why, and documents the escape.
+      Normalisation folds unicode form, curly quotes/dashes, case, whitespace, a wrapping quote pair and
+      trailing punctuation, so `SELECT.` and `"select"` match `select` — while keeping INTERNAL punctuation,
+      because `status = 'approved'` and `status approved` are different answers.
+      **Verified:** browser-verified that `STATUS = 'APPROVED'.` is graded correct (the original bug), that a
+      self-check item offers "Show solution" instead of "Check" and is never auto-marked, that the solution IS
+      visible before judging, and that the learner's verdict locks it. 9 client + 6 server tests.
+      **Bug found while verifying:** revealing a self-check item showed the verdict buttons but not the
+      solution — the steps were still gated behind `state.locked`, so the learner was asked to judge without
+      seeing the answer.
 - [ ] **T-042** Assessment validation has a known limit: it is **structural plus citation-resolvable**, so a
       wrong-but-well-cited generated item passes. Not solved, and not claimed to be — the mitigation shipped is
       that every quiz item shows its provenance (`authored` / `generated` / `cached`) and its citations. A
@@ -300,6 +316,10 @@
       destination, the submit button stays disabled until the destination is non-empty, and the file on disk
       carries the typed words with `<fill in later>` for the blank field. 2 unit tests cover the refusals
       (empty destination, no learning dir, already initiated).
+- [ ] **T-044** A UI-started course has `MISSION.md` only, so it renders **0 units** until the scaffold skill
+      writes `PLAN.md`/`SCHEMA.md`. That is correct, but from the catalogue it looks broken. **Done when:** a
+      started-but-empty course says so on its catalogue card and on its unit rail, and the course page offers
+      the path to scaffold it. The unit rail's empty state exists; the card and the next-step affordance do not.
 - [ ] **T-034** Derived persistence signal — review cycles survived — rendered as a small tick, never a
       colour. Behaviourally grounded, so honest to derive. **Not to be started without an explicit ask.**
 - [x] **T-037** Client test for the tray + mastery colour mapping, so drift is caught without a browser.

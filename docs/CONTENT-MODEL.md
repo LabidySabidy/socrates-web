@@ -108,6 +108,35 @@ invent a mastery value. A manifest unit referencing nothing real reads Not start
 
 Any other type string in a manifest is rejected with `unknown module type: <type>`.
 
+## The grading contract (P8)
+
+An auto-graded answer is only fair when a learner can be expected to reproduce it: a value, a term, a
+number, an identifier. So an item carries a `mode`:
+
+| `mode` | Behaviour | Requires |
+|---|---|---|
+| `short-answer` (default) | compared against the answer and its `accepts`, normalised | answer **≤ 6 words**, **≤ 60 chars**, and not more than one sentence |
+| `self-check` | the worked solution is revealed and **the learner judges their own answer**; never auto-marked | nothing beyond hints and steps |
+
+**Why the limits exist.** A paraphrase of a long answer cannot be checked against a list of accepted
+phrasings, so it is marked wrong — a **false negative**, which is worse than a false positive in a
+learning tool because it punishes a learner who was right. An item that needs prose must declare
+`self-check`; if it does not, validation **rejects** it with
+`answer-too-long-for-auto-grading:<words>-words-<chars>-chars-use-self-check`.
+
+An authored item obeys exactly the same rule as a generated one: a long answer without
+`- **mode:** self-check` is dropped with that warning, and so is a generated one.
+
+**Normalisation** (`normaliseAnswer`) folds unicode form, curly quotes and dashes, case, repeated
+whitespace, a wrapping pair of quotes/brackets, and trailing sentence punctuation — so `SELECT.`,
+`"select"` and `  select  ` all match `select`. Internal punctuation is **kept**: `status = 'approved'`
+and `status approved` are different answers, and a normaliser that accepted both would trade a false
+negative for a false positive.
+
+**One verdict per self-check item.** The solution has been revealed, so re-judging is meaningless.
+The consequence, which is deliberate: the per-item mastery gate cannot open on a self-check item. A
+wrong verdict still counts toward the attempt's total, which is what the mastery mapping reads.
+
 ## An attempt → mastery mapping (T-043)
 
 The only statement of a quiz-to-mastery relationship anywhere in this project is the design

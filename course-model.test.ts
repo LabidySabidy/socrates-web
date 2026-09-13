@@ -261,6 +261,47 @@ test("a manifest can author every module type, including the four added for the 
   assert.equal(ai.missing, undefined);
 });
 
+test("authored quiz items obey the same grading rule as generated ones", () => {
+  const src = load("course-basic");
+  const manifest = [
+    "## Unit 1: Rules",
+    "",
+    "## Quiz: Grading",
+    "",
+    "- **Q** Which command reads rows?",
+    "  - **answer:** select",
+    "  - **hint:** one word",
+    "  - **step:** select reads",
+    "",
+    "- **Q** Explain why the policy fails on a second run in your own words.",
+    "  - **answer:** The CREATE POLICY statement fails because a policy of that name already exists, so it needs a drop-if-exists guard before it is created again.",
+    "  - **hint:** think about what already exists",
+    "  - **step:** drop it first",
+    "",
+    "- **Q** Explain it again, properly declared this time.",
+    "  - **mode:** self-check",
+    "  - **answer:** The CREATE POLICY statement fails because a policy of that name already exists, so it needs a drop-if-exists guard before it is created again.",
+    "  - **hint:** think about what already exists",
+    "  - **step:** drop it first",
+    "",
+  ].join(String.fromCharCode(10));
+
+  const course = buildCourse({ ...src, manifestText: manifest });
+
+  assert.equal(course.derived, false);
+  const quizzes = course.quizzes;
+  assert.equal(quizzes.length, 1);
+  assert.deepEqual(
+    quizzes[0].items.map((i) => i.mode),
+    ["short-answer", "self-check"],
+    "the long item without a mode was dropped; the declared one was kept",
+  );
+  assert.ok(
+    course.warnings.some((w) => w.includes("answer-too-long-for-auto-grading")),
+    `expected a rejection warning, got ${JSON.stringify(course.warnings)}`,
+  );
+});
+
 test("a manifest with no units is invalid rather than silently empty", () => {
   const src = load("course-basic");
   const result = parseCourseManifest("# nothing here\n", src);
