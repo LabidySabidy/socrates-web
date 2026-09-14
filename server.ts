@@ -23,7 +23,7 @@ import { existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from "
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
-import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
+import { buildCourse, WARN, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
@@ -753,7 +753,9 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       // D3: a hand-edited H1 renames the course on the next read, so a read reconciles first. A course
       // whose document disagrees with its directory moves; every other read is a slug compare.
       flushPending();
-      reconcile(decodeURIComponent(courseMatch[1]));
+      // B3 — the result is CAPTURED, not discarded. This call site and the PATCH one above now agree that
+      // a failed rename matters; the asymmetry between them was the bug in one line.
+      const reconciled = reconcile(decodeURIComponent(courseMatch[1]));
       const result = discover();
       const ref = findCourse(result, decodeURIComponent(courseMatch[1]));
       if (!ref) {
@@ -761,7 +763,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         return;
       }
       try {
-        sendJson(res, 200, loadCourseTree(ref, readText));
+        const tree = loadCourseTree(ref, readText);
+        if (!reconciled.ok) {
+          // The move could not happen, so the H1 names a course this directory is not. Reporting that
+          // title would describe a URL that does not exist, so the tree derives its name from the
+          // DIRECTORY and the failure is surfaced as a warning. Derive, do not FAIL: a 500 because a
+          // cosmetic rename could not complete would take the whole course down.
+          tree.title = ref.id;
+          tree.warnings = [...tree.warnings, WARN.renameBlocked(reconciled.error ?? "the move failed")];
+        }
+        sendJson(res, 200, tree);
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
       }

@@ -202,7 +202,11 @@ export function CoursePage({
             <span aria-hidden="true"> › </span>
             <EditableTitle
               courseId={courseId}
-              title={current?.label ?? tree.title ?? courseId}
+              // B3 — the TREE wins over the course list. The tree is the payload that reconciles a blocked
+              // rename (it derives its title from the directory and warns), while the list derives a title
+              // from the H1 alone. Preferring the list put a name in the breadcrumb that this URL could not
+              // reach: the page said "Taken" while the route said `locked`.
+              title={tree.title || current?.label || courseId}
               as="span"
               onRenamed={(_from, to) => {
                 window.location.hash = hrefCourse(to, unitNumber ?? undefined).slice(1);

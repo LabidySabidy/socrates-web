@@ -1584,3 +1584,21 @@ test("no UI path renders a gate the app cannot trigger", () => {
   // the pure module survives, with its tests, as the design record
   assert.ok(existsSync(join(import.meta.dirname, "restgate.ts")), "restgate.ts is kept deliberately");
 });
+
+// ---------------------------------------------------------------------------
+// B3 — which source names the course
+// ---------------------------------------------------------------------------
+
+test("the course page prefers the tree's title over the list's label", () => {
+  // The tree is the payload that reconciles a blocked rename: it derives its title from the DIRECTORY and
+  // warns. The list derives a title from the H1 alone. Preferring the list put a name in the breadcrumb
+  // this URL could not reach — the page said "Taken" while the route said `locked`.
+  const source = readFileSync(join(import.meta.dirname, "components", "CoursePage.tsx"), "utf8");
+  const line = source.split("\n").find((l) => l.includes("title={"));
+  assert.ok(line, "the title binding must exist");
+  assert.match(line!, /tree\.title\s*\|\|/, `the tree must come first, got: ${line!.trim()}`);
+  assert.ok(
+    line!.indexOf("tree.title") < line!.indexOf("current?.label"),
+    "…and before the list label",
+  );
+});

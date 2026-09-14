@@ -187,6 +187,13 @@ export const WARN = {
   manifestInvalid: (reason: string) => `manifest-invalid:${reason}`,
   unknownLesson: (name: string) => `unknown-lesson:${name}`,
   manifestDuplicate: (name: string) => `manifest-duplicate:${name}`,
+  /**
+   * A rename that could not be applied, so the course's title and its directory disagree.
+   *
+   * The tree's `title` is then derived from the DIRECTORY — otherwise the payload would report a name
+   * whose URL does not resolve. The warning is how the failure stays visible instead of being swallowed.
+   */
+  renameBlocked: (reason: string) => `rename-blocked:${reason}`,
 } as const;
 
 export function slug(name: string): string {

@@ -1141,3 +1141,115 @@ test("a failed directory move is reported, not thrown at the learner", async (t)
   bridge.kill();
   assert.ok(!existsSync(to), "and nothing was created");
 });
+
+// ---------------------------------------------------------------------------
+// B3 — a course must not disagree with itself
+//
+// The tree is built from two sources: `id` from the directory, `title` from MISSION.md's H1. When a
+// rename cannot complete, the read path used to discard `reconcile`'s result, so the payload reported a
+// title whose directory — and therefore whose URL — did not exist. A delayed rename is a cosmetic lag;
+// a course displaying a name its URL cannot reach is a lie.
+// ---------------------------------------------------------------------------
+
+/** A course whose H1 names another course's directory, so the move cannot complete. */
+function makeCollidingCourse(id: string, claimedTitle: string): string {
+  const dir = join(STORE, id);
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    [`# ${claimedTitle}`, "", "## Destination", "", "- **I will be able to:** do the thing", ""].join("\n"),
+  );
+  writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 a-concept\n\n- **Status:** 🟨 Fair\n");
+  return dir;
+}
+
+test("a course whose rename cannot complete does not contradict itself", async (t) => {
+  const { base } = await boot(t);
+  // `taken` already exists, so `locked`'s title can never become its directory.
+  makeCollidingCourse("taken", "taken");
+  makeCollidingCourse("locked", "taken");
+
+  const res = await fetch(`${base}/api/courses/locked`);
+  const body = (await res.json()) as { id: string; title: string; warnings?: string[]; error?: string };
+
+  // A read must not FAIL because a rename could not complete — a 500 here would take the whole course
+  // down over a cosmetic lag.
+  assert.equal(res.status, 200, `the read must not fail: ${JSON.stringify(body)}`);
+  assert.equal(body.id, "locked", "the id follows the directory, which did not move");
+
+  // The core assertion: the two must not contradict each other.
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  assert.equal(
+    slug(body.title),
+    body.id,
+    `title "${body.title}" and id "${body.id}" disagree — the URL cannot reach the displayed name`,
+  );
+
+  // And the failure is VISIBLE, not silently swallowed (chosen channel: the tree's `warnings`).
+  assert.ok(
+    body.warnings?.some((w) => /rename|title/i.test(w)),
+    `the failed rename must be surfaced, got warnings=${JSON.stringify(body.warnings)}`,
+  );
+
+  rmSync(join(STORE, "locked"), { recursive: true, force: true });
+  rmSync(join(STORE, "taken"), { recursive: true, force: true });
+});
+
+test("a rename that SUCCEEDS still reports the new title and the new id", async (t) => {
+  // Guards against "fixing" the failure case by disabling renaming.
+  const { base } = await boot(t);
+  // The heading must MATCH the directory at rest, or the first read would legitimately move it and this
+  // would measure the move rather than the success path.
+  const dir = join(STORE, "renames-fine");
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    ["# Renames Fine", "", "## Destination", "", "- **I will be able to:** x", ""].join("\n"),
+  );
+  writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 a-concept\n\n- **Status:** 🟨 Fair\n");
+
+  const res = await fetch(`${base}/api/courses/renames-fine`);
+  assert.equal(res.status, 200);
+  const before = (await res.json()) as { id: string; title: string };
+  assert.equal(before.title, "Renames Fine", "the title is reported while it matches the directory");
+
+  // Now give it a title it CAN move to. The read of the OLD id is what reconciles — that is the design
+  // (a read makes the filesystem follow the document), so the test drives it the way a learner would: the
+  // page they already have open asks for the id it knows.
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    ["# A New Name", "", "## Destination", "", "- **I will be able to:** x", ""].join("\n"),
+  );
+  const afterMove = await fetch(`${base}/api/courses/renames-fine`);
+  // Either the old id followed the move (renamed) or it is gone with the old directory; both mean the
+  // rename happened. What must NOT happen is the old id reporting a title it no longer has.
+  if (afterMove.status === 200) {
+    const b = (await afterMove.json()) as { id: string; title: string };
+    assert.equal(b.title, "A New Name", "the report follows the document");
+  } else {
+    assert.equal(afterMove.status, 404, "the old id is simply gone");
+  }
+
+  const moved = await fetch(`${base}/api/courses/a-new-name`);
+  assert.equal(moved.status, 200, "the new id resolves");
+  const body = (await moved.json()) as { id: string; title: string };
+  assert.equal(body.id, "a-new-name");
+  assert.equal(body.title, "A New Name", "and the title moved with it");
+  assert.ok(!existsSync(dir), "the old directory is gone");
+
+  rmSync(join(STORE, "a-new-name"), { recursive: true, force: true });
+});
+
+test("the failed-rename warning names the reason and the intended name", async (t) => {
+  const { base } = await boot(t);
+  makeCollidingCourse("taken", "taken");
+  makeCollidingCourse("locked", "taken");
+
+  const body = (await (await fetch(`${base}/api/courses/locked`)).json()) as { warnings: string[] };
+  const warning = body.warnings.find((w) => /rename|title/i.test(w));
+  assert.ok(warning, `expected a rename warning, got ${JSON.stringify(body.warnings)}`);
+  assert.match(warning, /taken/, "it names the title that could not be applied");
+
+  rmSync(join(STORE, "locked"), { recursive: true, force: true });
+  rmSync(join(STORE, "taken"), { recursive: true, force: true });
+});
