@@ -14,12 +14,22 @@ import { splitAtGate } from "./restgate.ts";
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
+  /**
+   * Who authored a LEARNER-side turn.
+   *
+   * The tutor now opens a lesson (Step 2a) by sending an instruction on the learner's behalf, and that
+   * instruction was rendered in the same bubble a typed message uses — so the learner read
+   * `/skill:grill-misconception … I have not worked on it before`, a slash command and scripted
+   * first-person text they never wrote. `origin` distinguishes the app's own dispatch from the learner's
+   * own words; absent means the learner typed it.
+   */
+  origin?: "opening" | "dispatch";
 }
 
-export function appendUser(history: ChatTurn[], text: string): ChatTurn[] {
+export function appendUser(history: ChatTurn[], text: string, origin?: ChatTurn["origin"]): ChatTurn[] {
   const message = text.trim();
   if (!message) return history;
-  return [...history, { role: "user", text: message }];
+  return [...history, origin ? { role: "user", text: message, origin } : { role: "user", text: message }];
 }
 
 /**

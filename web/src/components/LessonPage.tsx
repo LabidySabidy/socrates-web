@@ -33,15 +33,6 @@ import {
   PASSIVITY_MESSAGE,
   refusalReason,
 } from "../passivity.ts";
-import {
-  formatCountdown,
-  isFrozen,
-  REST_BODY,
-  REST_HEADING,
-  REST_SECONDS,
-  splitAtGate,
-} from "../restgate.ts";
-
 interface ChatResponse {
   accepted?: boolean;
   course?: string;
@@ -82,10 +73,17 @@ export function LessonPage({
   const [tutor, setTutor] = useState<SessionStatus | null>(null);
   /** 3a — progress, badges and resolved misconceptions carried across sittings. */
   const [continuity, setContinuity] = useState<ContinuityResponse | null>(null);
-  /** The sprint gate: 300 seconds of frozen composer, no backend state. */
-  const [gateOpen, setGateOpen] = useState(false);
-  const [remaining, setRemaining] = useState(REST_SECONDS);
-  const gateSeen = useRef(false);
+  /**
+   * E1 — the rest gate is not wired. `restgate.ts` implements the mechanic and its tests still pin it, but
+   * NOTHING emits the `COGNITIVE SPRINT GATE` token: verified against the original (`06cee66^`), where the
+   * token appears only at its own definition (`app.js:25`) while the consumer reads it out of the model's
+   * stream (`app.js:126-128`). The producer never existed in either app, so a 300-second freeze was never
+   * reachable and is removed rather than left looking intentional.
+   *
+   * The pure module is kept deliberately: it is the only record of what the mechanic was meant to do, and
+   * if the idea is ever reintroduced it should arrive WITH a producer. Re-adding this state without one
+   * would recreate dead code, which is why the reason is here rather than in a commit message.
+   */
   /** The tutor's passivity intercept. Active until a real explanation is sent. */
   const [intercept, setIntercept] = useState(false);
   /**
@@ -185,6 +183,7 @@ export function LessonPage({
         mastery: standing?.mastery ?? null,
         misconceptions: miscon,
       }),
+      "opening",
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when the unit's state is known
   }, [continuity, tree, ask, history.length, busy, courseId, unitNumber]);
@@ -255,36 +254,10 @@ export function LessonPage({
   const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? tree?.units[0] ?? null;
   const { thinking, prose: rawProse } = splitTurn(turn);
   // Everything from a gate token onward is a control signal, not content.
-  const { prose, token } = splitAtGate(rawProse);
-  const frozen = isFrozen(gateOpen, remaining);
+  const prose = rawProse; // no gate token to split on: see the note above
   const blocked = refusalReason(intercept, input) === "passive";
   const tutorDown = tutor !== null && tutor.chat && !tutor.ok;
-  const canSend = maySubmit(intercept, input) && !busy && !frozen && !tutorDown;
-
-  // Open once, on the first turn that carries a token.
-  useEffect(() => {
-    if (!token || gateSeen.current) return;
-    gateSeen.current = true;
-    setGateOpen(true);
-    setRemaining(REST_SECONDS);
-    setBusy(false);
-  }, [token]);
-
-  // The countdown owns its interval and clears it on unmount, like the original's restTimer.
-  useEffect(() => {
-    if (!gateOpen) return;
-    const id = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          clearInterval(id);
-          setGateOpen(false);
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [gateOpen]);
+  const canSend = maySubmit(intercept, input) && !busy && !tutorDown;
 
   /**
    * Dispatch an arriving prompt: seed the composer so the learner can SEE what is being asked on their
@@ -311,23 +284,20 @@ export function LessonPage({
     // The ask is NOT stripped from the URL: it is the only record of what the learner clicked, and a
     // refresh has to be able to re-derive it. It is harmless to leave because `dispatched.current` stops
     // a re-fire within the same visit.
-    void send(ask);
+    void send(ask, "dispatch");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the dispatch key only
   }, [dispatchKey]);
 
   function exit() {
-    gateSeen.current = false;
     // The course page saves its own scroll offset on the way in (there is no .pane here).
     streamRef.current?.close();
     streamRef.current = null;
     onExit();
   }
 
-  async function send(explicit?: string) {
+  async function send(explicit?: string, origin?: ChatTurn["origin"]) {
     const message = (explicit ?? input).trim();
     if (!message || busy) return;
-    // The gate is a freeze, not a suggestion — same as the original's setBusy(true).
-    if (frozen) return;
     // BEHAVIOUR CHANGE: the original banner never blocked. This refuses a passive draft while the
     // tutor has signalled the intercept, and clears it once a real explanation goes out.
     if (!maySubmit(intercept, message)) return;
@@ -337,7 +307,7 @@ export function LessonPage({
     setError(null);
     setTurn(emptyTurn());
     // Appended BEFORE the reply, exactly as the original did.
-    setHistory((h) => appendUser(h, message));
+    setHistory((h) => appendUser(h, message, origin));
 
     let res: Response;
     try {
@@ -480,9 +450,25 @@ export function LessonPage({
 
           {history.map((m, i) =>
             m.role === "user" ? (
-              <div className="msg-user" key={i}>
-                {m.text}
-              </div>
+              // A turn the APP dispatched is not the learner's words. Rendering it in `.msg-user` showed
+              // them a slash command and scripted first-person text they never wrote (C2). It is still
+              // visible — the tutor's question should be readable — but as an app action, not as speech.
+              m.origin ? (
+                <div className={`msg-dispatch ${m.origin}`} key={i}>
+                  <span className="eyebrow">
+                    {m.origin === "opening" ? "Socrates opened this lesson" : "Asked for you"}
+                  </span>
+                  <span className="dispatch-note">
+                    {m.origin === "opening"
+                      ? "A recap and a question to start from."
+                      : "The tutor was asked to start this with you."}
+                  </span>
+                </div>
+              ) : (
+                <div className="msg-user" key={i}>
+                  {m.text}
+                </div>
+              )
             ) : (
               <div className="prose reading" key={i}>
                 {m.text}
@@ -541,7 +527,7 @@ export function LessonPage({
           placeholder="Ask a question, or explain it back in your own words…"
           aria-label="Message the tutor"
           rows={1}
-          disabled={busy || frozen}
+          disabled={busy || tutorDown}
         />
         <button
           type="button"
@@ -550,7 +536,7 @@ export function LessonPage({
           disabled={!canSend}
           title={blocked ? "Write a real explanation before sending" : undefined}
         >
-          {busy ? "Waiting…" : frozen ? "Resting…" : blocked ? "Explain it" : "Send"}
+          {busy ? "Waiting…" : blocked ? "Explain it" : "Send"}
         </button>
       </div>
 
@@ -566,17 +552,6 @@ export function LessonPage({
         </div>
       ) : null}
 
-      {gateOpen ? (
-        <div className="scrim" role="dialog" aria-modal="true" aria-label={REST_HEADING}>
-          <div className="gate rest-gate">
-            <h2 className="display">{REST_HEADING}</h2>
-            <p className="reading">{REST_BODY}</p>
-            <div className="countdown num" aria-live="off">
-              {formatCountdown(remaining)}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -537,11 +537,25 @@ probing turn. The first is better: the second trains the model to emit blocks th
 
 ## T-058 — `feynman-recite` is served in NO configuration
 
-**Status:** open, filed 2026-09-14 from the Part D spike. Not fixed here by instruction; recorded so it
-cannot be mistaken for part of the isolation change.
+**Status:** open. CORRECTED 2026-09-14 during the audit round: the original description was stale and
+would have sent someone chasing a call path that no longer exists. What changed and what did not is
+recorded below rather than silently edited.
 
-**Symptom.** The skill that the `Recite <concept>` module dispatches is never available to the tutor, so a
-recite click cannot start the skill it names.
+**Symptom (corrected).** `feynman-recite` is not available to the tutor. It is a PACKAGING GAP, not a
+loading mystery: the skill was never shipped in `pi/skills/`, so there is nothing for pi to load.
+
+**Evidence (verified this round).**
+- `ls pi/skills/` -> `skill-grill-misconception.md`, `skill-scaffold-learning.md`. Only two.
+- `ls -A ~/.socrates/pi/skills/` -> the same two. The runtime home is materialised from the repo, so a
+  skill absent from the repo cannot appear at runtime.
+- The earlier spike's multi-configuration comparison (`--skill <dir>`, three `--skill <file>` flags, the
+  real harness) is now explained by the simplest possible cause: the file was never in the set.
+
+**The stale claim, for the record.** The original text said "the lesson dispatches
+`/skill:feynman-recite`, which resolves to nothing". That was true when written and is true no longer:
+`moduleAskHref` (`web/src/grill.ts`) routes Recite and Explain to `grill-misconception` instead, precisely
+because this skill is unavailable. The only remaining reference is a comment at `web/src/grill.ts:85`
+explaining that choice. Nothing dispatches `feynman-recite` today.
 
 **Evidence (spike, real spawned children).**
 - The real harness served **10 skills**; `feynman-recite` was not among them.
@@ -557,5 +571,7 @@ recite click cannot start the skill it names.
 `/skill:feynman-recite`, which resolves to nothing. The visible effect is a lesson whose tutor has no
 instructions for the task it was asked to run.
 
-**Fix direction (not investigated).** Diff its frontmatter and file shape against a skill that IS served to
-find the exclusion, and check whether the dispatcher filters on something other than the frontmatter.
+**Fix direction (corrected).** Either ship the skill in `pi/skills/` and point `moduleAskHref`'s `recite`
+case back at it, or delete the dead reference and keep the grill substitution permanently. The first is a
+packaging change; the second is a one-line deletion plus a comment update. Both are cheap — the expensive
+part was believing there was a loading mechanism to debug.

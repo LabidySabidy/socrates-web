@@ -23,7 +23,7 @@ import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.
 import { completionView } from "./completion.ts";
 import { compile, sample } from "./expr.ts";
 import { parseWatchFrame } from "./watch.ts";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
@@ -1540,4 +1540,47 @@ test("absolute paths are neutralised in anything shown", () => {
 test("stripping paths leaves ordinary prose alone", () => {
   const prose = "You corrected the misconception about spoke tension — nice work.";
   assert.equal(stripAbsolutePaths(prose), prose);
+});
+
+// ---------------------------------------------------------------------------
+// Steps 2a/E1/C2 — who authored a turn, and what is no longer wired
+// ---------------------------------------------------------------------------
+
+test("an app-dispatched turn is recorded as dispatched, not as the learner's own words", () => {
+  // C2: the opener was sent through the same path as typed input, so the learner read a slash command and
+  // scripted first-person text they never wrote.
+  const afterUser = appendUser([], "what is camber?");
+  assert.equal(afterUser[0].origin, undefined, "a typed message has no origin");
+
+  const afterOpening = appendUser([], "/skill:grill-misconception X — recap me", "opening");
+  assert.equal(afterOpening[0].origin, "opening");
+
+  const afterDispatch = appendUser([], "/skill:grill-misconception X", "dispatch");
+  assert.equal(afterDispatch[0].origin, "dispatch");
+});
+
+test("the dispatch origin survives the other transcript helpers", () => {
+  const h = appendUser([], "hi", "opening");
+  const withReply = settleAssistant(h, "Here is the recap.");
+  assert.equal(withReply.length, 2);
+  assert.equal(withReply[0].origin, "opening", "settling a reply must not lose the origin");
+  assert.equal(withReply[1].role, "assistant");
+});
+
+test("an empty dispatch adds nothing, origin or not", () => {
+  assert.deepEqual(appendUser([], "   ", "opening"), []);
+});
+
+test("no UI path renders a gate the app cannot trigger", () => {
+  // E1: verified against the original (06cee66^), the token exists only at its own definition and the
+  // consumer reads it from the model's stream — no producer ever existed. The mechanic is therefore not
+  // wired, and restgate.ts is kept only as the record of what it was meant to do.
+  const source = readFileSync(join(import.meta.dirname, "components", "LessonPage.tsx"), "utf8");
+  assert.ok(!/setGateOpen\(/.test(source), "the gate must not be opened by unreachable state");
+  assert.ok(!/findGateToken\(/.test(source), "nor may anything try to detect a token nothing emits");
+  // The token NAME may appear in the explanatory comment — that is the record of why it is gone, not a
+  // use of it. What must not appear is an import or a call.
+  assert.ok(!/from "\.\.\/restgate\.ts"/.test(source), "and the module must not be imported for UI use");
+  // the pure module survives, with its tests, as the design record
+  assert.ok(existsSync(join(import.meta.dirname, "restgate.ts")), "restgate.ts is kept deliberately");
 });

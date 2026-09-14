@@ -775,3 +775,14 @@ a.mod:hover { text-decoration: none; }
 }
 .tutor-down p { margin: 0 0 8px; }
 .tutor-down ul { margin: 0 0 8px 18px; }
+
+/* An app-dispatched turn. Deliberately NOT the learner's bubble: the text is an instruction the app sent
+   on their behalf, so it is labelled as an action rather than shown as speech (C2). */
+.msg-dispatch {
+  border-left: 2px solid var(--rule);
+  padding: 4px 0 4px 12px;
+  margin: 10px 0;
+  color: var(--ink-55);
+}
+.msg-dispatch .eyebrow { display: block; margin-bottom: 2px; }
+.msg-dispatch .dispatch-note { font-size: 13px; font-style: italic; }
