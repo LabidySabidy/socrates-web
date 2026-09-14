@@ -25,7 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
-import { adoptGlobal, ensureHome, preflight, resolveProvider } from "./session.ts";
+import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import {
   courseRefs,
