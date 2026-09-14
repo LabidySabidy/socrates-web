@@ -8,10 +8,12 @@
  * Exit Lesson returns to the originating course and unit (both are in the route) and restores the
  * module pane's scroll position.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchCourse } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
-import { hrefCourse, hrefLesson } from "../router.ts";
+import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
+import { courseErrorView, shouldFollowRename } from "../course-error.ts";
+import { useCourseWatch } from "../watch.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { humanize } from "../humanize.ts";
@@ -77,9 +79,32 @@ export function LessonPage({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** A dispatched grill fires exactly once, however many times the component re-renders. */
   const dispatched = useRef<string | null>(null);
+  /**
+   * B4 — the error must not survive a navigation. A stale id left "unknown course: …" on screen even
+   * after the learner moved to the correct lesson, so the message outlived the problem it described.
+   * Cleared whenever the route's course or unit changes.
+   */
+  useEffect(() => {
+    setError(null);
+  }, [courseId, unitNumber]);
+
+  /**
+   * B2 — one navigation per rename, and never while a turn is running.
+   *
+   * `busy` is read through a ref because the SSE handler that receives the frame is created once per
+   * turn and closes over the `busy` of that moment; reading state directly would decide with a stale
+   * value. A rename mid-turn would strand the reply in flight, so it is ignored and the next read
+   * reconciles anyway.
+   */
+  const busyRef = useRef(false);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  const followedRename = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    setTree(null);
     fetchCourse(courseId)
       .then((t) => {
         if (alive) setTree(t);
@@ -93,6 +118,40 @@ export function LessonPage({
       streamRef.current = null;
     };
   }, [courseId]);
+
+  /**
+   * B1 — follow a rename while the learner is sitting in the lesson.
+   *
+   * This is exactly where they are when the scaffold names the course: the interview runs here, the
+   * tutor writes the H1, the directory moves, and the id this page holds goes stale. The course page
+   * already followed it; without this the lesson stayed on a dead URL and a refresh showed the server's
+   * raw string.
+   */
+  useCourseWatch(
+    useCallback(() => {
+      /* a reload frame for a course we no longer hold by that id — the rename frame carries the move */
+    }, []),
+    true,
+    useCallback(
+      (from: string, to: string) => {
+        const follow = shouldFollowRename({
+          from,
+          to,
+          courseId,
+          busy: busyRef.current,
+          alreadyFollowed: followedRename.current,
+        });
+        if (!follow) return;
+        followedRename.current = `${from}->${to}`;
+        // Assigning the hash FIRES `hashchange`, which is what the router listens for — `replaceState`
+        // would move the URL without the route ever re-parsing, so the page would keep the old tree. The
+        // unit is preserved, so the learner stays on the concept they were working on.
+        window.location.hash = hrefLesson(to, unitNumber).slice(1);
+        setTree(null);
+      },
+      [courseId, unitNumber],
+    ),
+  );
 
   const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? tree?.units[0] ?? null;
   const { thinking, prose: rawProse } = splitTurn(turn);
@@ -239,6 +298,31 @@ export function LessonPage({
       if (streamRef.current === es) streamRef.current = null;
       setBusy(false);
     };
+  }
+
+  // B3 — a course that never loaded gets a real state: a sentence a person would write, and a way back.
+  // Checked as `error && !tree` so a CHAT error (which arrives with a tree already on screen) keeps the
+  // inline notice and the composer stays usable — only a course that could not be read at all takes over
+  // the page. The raw server string is never shown; `courseErrorView` names a cause only when the
+  // server's own text does.
+  if (error && !tree) {
+    const view = courseErrorView(error);
+    return (
+      <main className="page">
+        <h1 className="display greeting">{view.heading}</h1>
+        <p className="greeting-sub reading">{view.detail}</p>
+        {view.renamed ? (
+          <p className="reading">
+            Your courses are listable from the library, where the current name is.
+          </p>
+        ) : null}
+        <p>
+          <a className="primary" href={hrefHome()}>
+            ← Back to the library
+          </a>
+        </p>
+      </main>
+    );
   }
 
   return (

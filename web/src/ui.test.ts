@@ -27,6 +27,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
+import { courseErrorView, shouldFollowRename } from "./course-error.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
@@ -1386,4 +1387,74 @@ test("every component that humanises actually imports the function", () => {
       );
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// B — a rename must not break the open lesson
+// ---------------------------------------------------------------------------
+
+test("an open lesson follows a rename exactly once", () => {
+  const base = { from: "bicycle-wheel-truing", to: "wheel-building-and-truing", courseId: "bicycle-wheel-truing", busy: false, alreadyFollowed: null };
+  assert.equal(shouldFollowRename(base), true, "the page holding the old id follows it");
+  assert.equal(
+    shouldFollowRename({ ...base, alreadyFollowed: "bicycle-wheel-truing->wheel-building-and-truing" }),
+    false,
+    "a re-delivered frame must not navigate a second time",
+  );
+});
+
+test("a page holding a different course ignores the rename", () => {
+  // Every open tab receives every frame; only the one on the renamed course may react.
+  assert.equal(
+    shouldFollowRename({ from: "a", to: "b", courseId: "c", busy: false, alreadyFollowed: null }),
+    false,
+  );
+  // …and a malformed frame is not a rename at all.
+  assert.equal(shouldFollowRename({ from: "", to: "b", courseId: "", busy: false, alreadyFollowed: null }), false);
+  assert.equal(shouldFollowRename({ from: "a", to: "", courseId: "a", busy: false, alreadyFollowed: null }), false);
+});
+
+test("a turn in flight is not interrupted by a rename", () => {
+  // Mid-turn the tutor is still writing, and it would be writing into a directory the page has left.
+  assert.equal(
+    shouldFollowRename({ from: "a", to: "b", courseId: "a", busy: true, alreadyFollowed: null }),
+    false,
+  );
+});
+
+test("a stale id reads as a sentence with a way back, never a raw server string", () => {
+  // The observed failure: `unknown course: bicycle-wheel-truing-and-tensioning` on screen, no link.
+  const view = courseErrorView("unknown course: bicycle-wheel-truing-and-tensioning");
+  assert.equal(view.renamed, true);
+  assert.ok(!view.detail.includes("unknown course:"), "the server's phrasing is not shown");
+  assert.ok(view.detail.includes("bicycle-wheel-truing-and-tensioning"), "it names what is missing");
+  assert.match(view.detail, /renamed/i, "and states the likely cause, which is a rename");
+});
+
+test("a non-rename failure is not blamed on a rename", () => {
+  // Do not tell a learner their course moved when the server was simply down.
+  const down = courseErrorView("could not reach the server");
+  assert.equal(down.renamed, false);
+  assert.equal(down.detail, "could not reach the server");
+  const other = courseErrorView("HTTP 500");
+  assert.equal(other.renamed, false);
+  assert.equal(other.heading, "Course unavailable");
+});
+
+// The deferred-rename boundary, stated because it is real and was observed end to end:
+//   a rename requested WHILE A TURN IS RUNNING is deferred by the server, and the lesson deliberately
+//   does not follow it mid-turn — the tutor would be writing into a directory the page has left. So the
+//   page keeps the old id until the learner does something. A reload recovers (verified: the stale id
+//   showed no error at all, because the reconcile runs on read and the page then asked for a course that
+//   exists). This test pins the rule that produces that behaviour so nobody "fixes" it into a mid-turn
+//   navigation.
+test("the follow rule is the only thing deciding a rename navigation", () => {
+  assert.equal(
+    shouldFollowRename({ from: "a", to: "b", courseId: "a", busy: false, alreadyFollowed: null }),
+    true,
+  );
+  assert.equal(
+    shouldFollowRename({ from: "a", to: "b", courseId: "a", busy: true, alreadyFollowed: null }),
+    false,
+  );
 });

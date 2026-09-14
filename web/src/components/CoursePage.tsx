@@ -9,6 +9,7 @@ import { useCourseWatch } from "../watch.ts";
 import { EditableTitle } from "./EditableTitle.tsx";
 import { grillHref, scaffoldHref } from "../grill.ts";
 import { humanize } from "../humanize.ts";
+import { courseErrorView } from "../course-error.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { moduleRingLabel } from "../module-types.ts";
@@ -108,11 +109,23 @@ export function CoursePage({
   }, [courseId]);
 
   if (error) {
+    // The same mapping the lesson uses: a raw `unknown course: <slug>` is the API's phrasing, not a
+    // message, and a rename is the usual reason an id goes stale while the app is open.
+    const view = courseErrorView(error);
     return (
       <main className="page">
-        <h1 className="display greeting">Course unavailable</h1>
-        <p className="greeting-sub reading">{error}</p>
-        <a href={hrefHome()}>← All courses</a>
+        <h1 className="display greeting">{view.heading}</h1>
+        <p className="greeting-sub reading">{view.detail}</p>
+        {view.renamed ? (
+          <p className="reading">
+            Your courses are listable from the library, where the current name is.
+          </p>
+        ) : null}
+        <p>
+          <a className="primary" href={hrefHome()}>
+            ← Back to the library
+          </a>
+        </p>
       </main>
     );
   }

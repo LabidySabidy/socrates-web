@@ -410,3 +410,33 @@ turns the current install into a product, and it is the prerequisite for anyone 
 the app is still being tested and the extension surface is changing; a startup check that fails
 loudly when `~/.pi/agent` lacks the extensions — cheap and tempting, but it would bake the dependency
 in harder by making the local layout contractual, which is the opposite of the follow-up.
+
+## 2026-09-14 — A rename follows the open page, and the error stops being the server's sentence
+
+**Context:** reproduced live. The learner sat in a lesson while the scaffold named the course; the
+directory renamed and the page did not follow, because only the course page handled the
+`{type:"renamed"}` frame. A refresh then rendered the API's own phrasing — `unknown course:
+bicycle-wheel-truing-and-tensioning` — with an empty transcript, and that message STAYED on screen after
+navigating to the correct lesson.
+
+**Decision:** three rules, all in one place each.
+
+1. **Follow once, only for the page holding the old id, never mid-turn.** `shouldFollowRename` in
+   `web/src/course-error.ts` is the whole rule: `from === courseId`, not `busy`, and not already
+   followed. The unit is preserved, so the learner stays on the concept they were reading.
+2. **The deferred case is a boundary, not a bug.** A rename requested while a turn is running is deferred
+   by the server (Windows cannot rename a live process's cwd) and the page does not follow it mid-turn —
+   the tutor would go on writing into a directory the page has left. The page keeps the old id until the
+   learner acts; a reload recovers, because reconciliation runs on read. Observed: the stale id shows the
+   friendly state, not an error.
+3. **An unknown course id is a sentence with a way back.** `courseErrorView` names a cause only when the
+   server's text does, so a rename is called a rename and a 500 is not. The raw string is never rendered.
+   Errors also clear on any route change (`LessonPage`), because a message that outlives the problem it
+   describes is worse than no message.
+
+**Alternatives considered:** mapping old ids to new ones so a stale URL keeps working — rejected, and it
+is forbidden by the naming model: an alias table exists to preserve a name that is not the truth. The old
+URL may 404, and now it 404s legibly.
+
+**Tradeoffs:** a stale page after a deferred rename must be reloaded. Accepted: the alternative is
+interrupting a running tutor turn to move a directory out from under it.
