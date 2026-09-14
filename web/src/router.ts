@@ -14,7 +14,13 @@ import { splitHash } from "./grill.ts";
 export type Route =
   | { name: "home" }
   | { name: "course"; courseId: string; unit: number | null }
-  | { name: "lesson"; courseId: string; unit: number; ask: string | null }
+  /**
+   * `unit` is undefined when the URL named NO unit (`#/lesson/<course>`), which the page legitimately
+   * defaults to the first unit. It is the REQUESTED value otherwise, even when no such unit exists — the
+   * page must be able to tell "the first unit, by default" from "a unit that is not there" (G2). Coercing
+   * both to 1 here is what made `#/lesson/c/abc` work silently while `#/lesson/c/99` showed a false label.
+   */
+  | { name: "lesson"; courseId: string; unit: number | undefined; ask: string | null }
   | { name: "quiz"; courseId: string; unit: number }
   | { name: "lab"; courseId: string; unit: number }
   | { name: "unknown"; raw: string };
@@ -27,11 +33,14 @@ export function parseHash(hash: string): Route {
   const ask = params.get("ask");
   if (parts.length === 0 || parts[0] === "home") return { name: "home" };
   if (parts[0] === "lesson" && parts[1]) {
-    const unit = Number(parts[2]);
+    // Preserve what was asked for. A missing segment is undefined (default to the first unit); a present
+    // one is passed through AS PARSED, so the page can refuse it rather than silently substituting unit 1.
+    const raw = parts[2];
+    const unit = raw === undefined ? undefined : Number(raw);
     return {
       name: "lesson",
       courseId: decodeURIComponent(parts[1]),
-      unit: Number.isFinite(unit) && unit > 0 ? unit : 1,
+      unit: unit === undefined ? undefined : Number.isNaN(unit) ? Number.NaN : unit,
       ask: ask && ask.trim() ? ask : null,
     };
   }

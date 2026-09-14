@@ -19,6 +19,7 @@ import {
 } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
+import { resolveUnit } from "../unit-selection.ts";
 import { courseErrorView, humanMessage, shouldFollowRename } from "../course-error.ts";
 import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
@@ -49,7 +50,8 @@ export function LessonPage({
   onExit,
 }: {
   courseId: string;
-  unitNumber: number;
+  /** The unit the URL asked for, or undefined when it asked for none (G2). */
+  unitNumber: number | undefined;
   /** A prompt to dispatch on arrival — how a tray or rail click starts a grill. */
   ask?: string | null;
   /**
@@ -244,14 +246,21 @@ export function LessonPage({
         // Assigning the hash FIRES `hashchange`, which is what the router listens for — `replaceState`
         // would move the URL without the route ever re-parsing, so the page would keep the old tree. The
         // unit is preserved, so the learner stays on the concept they were working on.
-        window.location.hash = hrefLesson(to, unitNumber).slice(1);
+        window.location.hash = hrefLesson(to, unitNumber ?? unit?.n ?? 1).slice(1);
         setTree(null);
       },
       [courseId, unitNumber],
     ),
   );
 
-  const unit: Unit | null = tree?.units.find((u) => u.n === unitNumber) ?? tree?.units[0] ?? null;
+  // G2 — the resolution is a decision, not a fallback expression: "no unit asked for" defaults to the
+  // first, while "a unit that does not exist" is reported as such rather than silently showing unit 1.
+  const resolution = tree ? resolveUnit(tree.units, unitNumber) : null;
+  const unit: Unit | null =
+    resolution && (resolution.kind === "found" || resolution.kind === "default") ? resolution.unit : null;
+  const outOfRange = resolution?.kind === "out-of-range" ? resolution : null;
+  /** A unit number safe to print: never exponential, never fractional, never a number the course lacks. */
+  const unitLabel = unit ? String(unit.n) : null;
   const { thinking, prose: rawProse } = splitTurn(turn);
   // Everything from a gate token onward is a control signal, not content.
   const prose = rawProse; // no gate token to split on: see the note above
@@ -391,6 +400,35 @@ export function LessonPage({
   // inline notice and the composer stays usable — only a course that could not be read at all takes over
   // the page. The raw server string is never shown; `courseErrorView` names a cause only when the
   // server's own text does.
+  // G2 — a unit that does not exist. It is NOT unit 1's content under a different label: the learner asked
+  // for something this course does not have, so the page says so and offers the units it does.
+  if (outOfRange && tree) {
+    return (
+      <div className="lesson">
+        <nav className="lesson-bar" aria-label="Lesson">
+          <a href={hrefCourse(courseId)} onClick={exit}>
+            {tree.title}
+          </a>
+          <span aria-hidden="true"> › </span>
+          <span>Not found</span>
+        </nav>
+        <main className="page">
+          <h1 className="display greeting">There is no unit here</h1>
+          <p className="greeting-sub reading">
+            {outOfRange.requested > 0
+              ? `This course has ${outOfRange.available.length} unit${outOfRange.available.length === 1 ? "" : "s"}, so there is no unit ${outOfRange.requested}.`
+              : `That is not a unit in this course — it has ${outOfRange.available.length} unit${outOfRange.available.length === 1 ? "" : "s"}.`}
+          </p>
+          <p>
+            <a className="primary" href={hrefLesson(courseId, outOfRange.available[0])}>
+              Start at unit {outOfRange.available[0]}
+            </a>
+          </p>
+        </main>
+      </div>
+    );
+  }
+
   if (error && !tree) {
     const view = courseErrorView(error);
     return (
@@ -415,11 +453,11 @@ export function LessonPage({
     <div className="lesson">
       <nav className="lesson-bar" aria-label="Lesson">
         <span className="crumbs">
-          <a href={hrefCourse(courseId, unitNumber)} onClick={exit}>
+          <a href={hrefCourse(courseId, unitNumber ?? unit?.n ?? 1)} onClick={exit}>
             {tree?.title ?? courseId}
           </a>
           <span aria-hidden="true"> › </span>
-          <span>Unit {unitNumber}</span>
+          {unitLabel ? <span>Unit {unitLabel}</span> : null}
           {unit ? (
             <>
               <span aria-hidden="true"> › </span>
