@@ -58,13 +58,38 @@ export async function captureFrame(): Promise<CaptureResult> {
   }
   let stream: MediaStream | null = null;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    // ASK FOR THIS TAB FIRST WHERE IT IS SUPPORTED.
+    //
+    // `preferCurrentTab` makes the picker default to the tab you are looking at, which is what a bug report
+    // almost always wants. Chrome and Edge honour it; Brave does not expose it, and unsupported keys in a
+    // constraint dictionary are IGNORED rather than throwing — so this is additive and costs nothing where
+    // it is not supported. `selfBrowserSurface: "include"` is the part that makes the CURRENT tab a listed
+    // choice rather than excluded; the owner reported that their localhost tab did not appear under the
+    // Brave-tab list, and this is the constraint that governs that.
+    //
+    // Neither is load-bearing: if a browser ignores both, the picker behaves exactly as before.
+    const constraints = {
+      video: true,
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+    } as DisplayMediaStreamOptions;
+    stream = await navigator.mediaDevices.getDisplayMedia(constraints);
     const video = document.createElement("video");
     video.srcObject = stream;
     video.muted = true;
+    video.playsInline = true;
     await video.play();
-    // One rendered frame is enough; `requestVideoFrameCallback` is not universally available, so waiting for
-    // a playing video is the portable signal.
+    // WAIT FOR A PAINTED FRAME, then wait again.
+    //
+    // `play()` resolving only means playback STARTED. Grabbing immediately can capture the frame still
+    // showing the browser's share picker, because that overlay is composited into the captured surface and
+    // nothing guarantees a clean frame has been delivered yet. Reported by the owner: choosing the window
+    // produced a screenshot with the picker in it.
+    //
+    // Two awaits, because the first callback can fire on a frame that predates the picker closing: the
+    // first gets a frame, the second gets one that is at least a paint later.
+    await nextFrame(video);
+    await nextFrame(video);
     const width = video.videoWidth;
     const height = video.videoHeight;
     if (!width || !height) return { ok: false, reason: "the captured frame had no size" };
@@ -103,4 +128,19 @@ export function dataUrlBytes(dataUrl: string): number {
 /** Whether a frame is small enough to send. Checked before posting, so the refusal is instant and local. */
 export function frameWithinCap(frame: Frame): boolean {
   return dataUrlBytes(frame.dataUrl) <= MAX_IMAGE_BYTES;
+}
+
+/**
+ * Resolve once the video has delivered a frame.
+ *
+ * `requestVideoFrameCallback` is the API that means "a frame is ready"; where it is missing, a double
+ * `requestAnimationFrame` is the portable approximation. Neither is a substitute for the other's guarantee,
+ * so both are tried rather than assuming one exists.
+ */
+async function nextFrame(video: HTMLVideoElement): Promise<void> {
+  if (typeof video.requestVideoFrameCallback === "function") {
+    await new Promise<void>((resolve) => video.requestVideoFrameCallback(() => resolve()));
+    return;
+  }
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }

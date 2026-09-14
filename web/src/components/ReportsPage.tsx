@@ -101,7 +101,6 @@ export function ReportsPage() {
             </header>
 
             <p className="report-what reading">{r.whatIsWrong}</p>
-            {r.expected ? <p className="report-expected reading">Expected: {r.expected}</p> : null}
 
             {r.hasImage ? (
               <button

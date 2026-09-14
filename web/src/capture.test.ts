@@ -8,6 +8,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   MAX_IMAGE_BYTES,
   captureFailureReason,
@@ -62,4 +64,29 @@ test("the cap is checked before sending, so an oversized frame is refused locall
   const huge = { dataUrl: `data:image/png;base64,${"A".repeat(Math.ceil((MAX_IMAGE_BYTES + 10) / 3) * 4)}`, width: 1, height: 1 };
   assert.equal(frameWithinCap(huge), false, "over the cap");
   assert.equal(MAX_IMAGE_BYTES, 8 * 1024 * 1024, "the cap matches the server's");
+});
+
+test("the capture asks for the current tab, and does not depend on getting it", () => {
+  // The owner reported their localhost tab missing from the picker's tab list, and a window capture that
+  // included the picker itself. `preferCurrentTab` makes the current tab the default where it is supported
+  // (Chrome/Edge); `selfBrowserSurface: "include"` is what governs whether the current tab is LISTED at all.
+  // Brave does not expose either, and unsupported constraint keys are ignored rather than throwing — so the
+  // request is additive and must never be load-bearing.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  assert.match(source, /preferCurrentTab:\s*true/, "the current tab is preferred where supported");
+  assert.match(source, /selfBrowserSurface:\s*"include"/, "and the current tab is offered as a choice");
+  // It must still work when both are ignored: the call itself carries only `video`.
+  assert.match(source, /getDisplayMedia\(constraints\)/, "the constraints are passed as one object");
+  assert.ok(!/if \(.*preferCurrentTab.*\)\s*throw/.test(source), "an ignored constraint must never throw");
+});
+
+test("the frame is taken after a PAINT, not merely after play() resolves", () => {
+  // Reported: choosing the window captured the picker overlay, because `play()` resolving means playback
+  // STARTED, not that a clean frame has been delivered. The fix waits on the frame callback.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  assert.match(source, /requestVideoFrameCallback/, "it waits for a delivered frame");
+  assert.match(source, /await nextFrame\(video\);\s*\n\s*await nextFrame\(video\);/,
+    "twice, since the first callback can report a frame that predates the picker closing");
+  // and the portable fallback exists for browsers without the callback
+  assert.match(source, /requestAnimationFrame/, "with a fallback for browsers lacking the callback");
 });

@@ -43,6 +43,16 @@ test("Escape closes an empty draft and confirms a non-empty one", () => {
   assert.match(panel, /Keep editing/, "and the draft can be kept");
 });
 
+test("there is ONE field, not two", () => {
+  // The owner's request: capturing produces one paragraph that mentions the fault and what was expected, and
+  // two boxes forced a decision about which one an observation belonged in.
+  const textareas = panel.split("<textarea").length - 1;
+  assert.equal(textareas, 1, `expected a single textarea, found ${textareas}`);
+  assert.ok(!panel.includes("What you expected instead"), "the second field's label is gone");
+  // The stored shape keeps `expected` so the API and store are unchanged.
+  assert.match(panel, /expected: ""/, "the field is still sent, just empty");
+});
+
 test("Save is disabled while the required field is empty", () => {
   // The Group 1 rule: the client must never offer an action guaranteed to fail.
   assert.match(panel, /disabled=\{busy \|\| !whatIsWrong\.trim\(\)\}/, "the button gates on the required field");

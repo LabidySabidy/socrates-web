@@ -36,8 +36,13 @@ export function ReportBugPanel({
   /** The current unit's conversation, offered as an attachment. Empty when there is nothing to attach. */
   transcript: { role: "user" | "assistant"; text: string }[];
 }) {
+  /**
+   * ONE field, not two. The owner asked for this directly: "I just want one field that I can capture all of
+   * those insights." Two boxes forced a decision about which one an observation belonged in, while capturing
+   * tends to produce one paragraph that mentions the fault AND what was expected. `expected` stays in the
+   * stored shape (the API and the store are unchanged) and is simply empty, so nothing downstream moves.
+   */
   const [whatIsWrong, setWhatIsWrong] = useState("");
-  const [expected, setExpected] = useState("");
   const [frame, setFrame] = useState<Frame | null>(null);
   const [captureNote, setCaptureNote] = useState<string | null>(null);
   const [attachTranscript, setAttachTranscript] = useState(false);
@@ -47,7 +52,7 @@ export function ReportBugPanel({
   const [error, setError] = useState<string | null>(null);
   const firstField = useRef<HTMLTextAreaElement | null>(null);
 
-  const hasDraft = whatIsWrong.trim().length > 0 || expected.trim().length > 0;
+  const hasDraft = whatIsWrong.trim().length > 0;
 
   // Capture once, when the panel opens. The dialog appears on every capture; that is expected and the copy
   // below says so, because an unexplained permission prompt reads as something being wrong.
@@ -113,7 +118,7 @@ export function ReportBugPanel({
     setError(null);
     void postReport({
       whatIsWrong,
-      expected,
+      expected: "",
       route,
       course,
       unit,
@@ -185,23 +190,13 @@ export function ReportBugPanel({
       </p>
 
       <label className="report-field">
-        <span className="eyebrow">What&rsquo;s wrong</span>
+        <span className="eyebrow">What&rsquo;s wrong, and what you expected</span>
         <textarea
           ref={firstField}
           value={whatIsWrong}
           onChange={(e) => setWhatIsWrong(e.target.value)}
-          rows={3}
+          rows={4}
           aria-label="What's wrong"
-        />
-      </label>
-
-      <label className="report-field">
-        <span className="eyebrow">What you expected instead</span>
-        <textarea
-          value={expected}
-          onChange={(e) => setExpected(e.target.value)}
-          rows={2}
-          aria-label="What you expected instead"
         />
       </label>
 
