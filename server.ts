@@ -235,12 +235,28 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
    *
    * Windows cannot rename a live process's cwd and the agent's cwd IS the course directory, so a
    * rename while a turn is in flight is DEFERRED rather than forced — breaking a running turn to
-   * rename a folder would be a worse bug than a name that lands a few seconds late. It is flushed on
-   * settle, and only the most recent request is kept because the reconcile re-reads the H1 anyway.
+   * rename a folder would be a worse bug than a name that lands a few seconds late. Only the most recent
+   * request is kept, because the reconcile re-reads the H1 anyway.
+   *
+   * IT EXPIRES, and that is not a detail. A deferral used to survive indefinitely in memory, so a rename
+   * asked for during one turn would fire on the NEXT unrelated settle — which is how a stale test title
+   * came back hours later and tried to rename a real course. A pending request is only meaningful for the
+   * turn it was deferred behind; after that the learner has long since moved on, and a read reconciles
+   * anyway.
    */
-  let pendingReconcile: string | null = null;
-  /** The title a deferred rename was asked for, applied at the same moment the move runs. */
-  let pendingTitle: string | null = null;
+  let pendingReconcile: { id: string; title: string | null; expiresAt: number } | null = null;
+
+  function clearPending(): void {
+    pendingReconcile = null;
+  }
+
+  /**
+   * How long a deferred rename stays meaningful.
+   *
+   * Long enough for a turn to finish (the longest seen is ~5 minutes), short enough that it cannot be
+   * carried into a different sitting. Beyond this the learner has moved on, and a read reconciles anyway.
+   */
+  const DEFER_TTL_MS = 10 * 60 * 1000;
   /**
    * The app's OWN tutor session, composed once here and printed so it can never hide. `chat: false`
    * (tests) skips it entirely — no preflight, no adoption, no spawn.
@@ -331,7 +347,9 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       if (evt?.type === "agent_settled") {
         bridge.markIdle();
         finalize("done");
-        flushPending();
+        // Only a deferral for the course that just settled may fire; an unrelated turn must never move a
+        // directory.
+        flushPending(turnCourse);
       } else if (evt?.type === "response" && evt.command === "prompt" && evt.success === false) {
         finalize("error", evt.error);
       }
@@ -388,13 +406,21 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   /**
    * Apply a rename that was deferred because a turn was in flight. Called on settle and before a read,
    * so the deferred name lands as soon as the agent stops rather than waiting for the learner to act.
+   *
+   * It refuses to fire once the deferral has expired, and it refuses when the pending course is not the
+   * one that just settled — an unrelated turn settling must never move a directory.
    */
-  function flushPending(): void {
-    const id = pendingReconcile;
-    if (!id || bridge.isBusy) return;
-    pendingReconcile = null;
-    const title = pendingTitle;
-    pendingTitle = null;
+  function flushPending(settledCourseId?: string | null): void {
+    const pending = pendingReconcile;
+    if (!pending || bridge.isBusy) return;
+    if (Date.now() > pending.expiresAt) {
+      console.log(`[rename] discarded an expired deferred rename for ${pending.id}`);
+      clearPending();
+      return;
+    }
+    if (settledCourseId && settledCourseId !== pending.id) return;
+    clearPending();
+    const { id, title } = pending;
     const ref = findCourse(discover(), id);
     if (!ref) return;
     if (title) {
@@ -417,7 +443,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     const ref = findCourse(discover(), id);
     if (!ref) return { ok: false, id, error: `unknown course: ${id}` };
     if (bridge.isBusy) {
-      pendingReconcile = id;
+      pendingReconcile = { id, title: null, expiresAt: Date.now() + DEFER_TTL_MS };
       return { ok: true, id, deferred: true };
     }
 
@@ -438,7 +464,15 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     let result;
     if (active) {
       const toDir = courseDir(wanted, storeEnv);
-      bridge.moveCourseDir(ref.dir, toDir);
+      const moved = bridge.moveCourseDir(ref.dir, toDir);
+      if (!moved.ok) {
+        // The move failed and the agent is already torn down. Respawn where it was so the course still
+        // works, and report the failure rather than leaving a half-applied rename behind.
+        if (wasWatching) resyncWatchers();
+        bridge.switchCourse(ref.dir);
+        console.error(`[rename] could not move ${ref.dir}: ${moved.error}`);
+        return { ok: false, id, error: `this course could not be renamed — the folder is in use` };
+      }
       result = {
         ok: true as const,
         renamed: true as const,
@@ -691,8 +725,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
       if (bridge.isBusy) {
         // Never rename under a live agent (Windows cannot move its cwd). Defer, and say so.
-        pendingReconcile = ref.id;
-        pendingTitle = valid.clean;
+        pendingReconcile = { id: ref.id, title: valid.clean, expiresAt: Date.now() + DEFER_TTL_MS };
         sendJson(res, 202, { deferred: true, id: ref.id, pending: { title: valid.clean } });
         return;
       }

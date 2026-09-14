@@ -206,9 +206,18 @@ export class ProcessBridge {
    * the respawn: `switchCourse(newDir)` on its own would spawn into a directory that does not exist yet.
    * The respawn afterwards is `switchCourse`, so there is still one kill/respawn path.
    */
-  moveCourseDir(from: string, to: string): void {
+  moveCourseDir(from: string, to: string): { ok: true } | { ok: false; error: string } {
     if (resolve(this.cwd) === resolve(from)) this.terminate();
-    renameSync(from, to);
+    try {
+      renameSync(from, to);
+      return { ok: true };
+    } catch (err) {
+      // EPERM here is expected whenever something still holds the directory open — another handle, a
+      // crashed process, or a scanner mid-scan. It must be a RETURNED failure, not a throw: this is called
+      // from a settle handler and from a read, and an escaping error took the whole course page down with
+      // a raw filesystem message in front of the learner.
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /**

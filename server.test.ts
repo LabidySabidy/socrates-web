@@ -13,6 +13,7 @@ import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync, m
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer, type RunningServer } from "./server.ts";
+import { ProcessBridge } from "./process-bridge.ts";
 import { parseLearning } from "./learning-parser.ts";
 
 const FIXTURES = join(import.meta.dirname, "test", "fixtures");
@@ -1021,4 +1022,57 @@ test("the tutor writing a title renames the course without anyone asking", async
     "# Driveway Toe Alignment",
   );
   rmSync(join(STORE, "driveway-toe-alignment"), { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// a deferred rename must not come back later and move a directory
+// ---------------------------------------------------------------------------
+
+test("a rename deferred during a turn does not outlive the turn that deferred it", async (t) => {
+  // Reproduced live: a deferral asked for hours earlier was still pending in memory, and the next turn to
+  // settle — in a DIFFERENT course — triggered it, trying to rename the owner's real course to a stale
+  // test title. Two properties guard against that now: the deferral is scoped to the course that settled,
+  // and it expires.
+  process.env.MOCK_SETTLE_MS = "900";
+  const { base } = await bootChatWith(t, "mock-pi-slow.mjs");
+  const dir = makeTitledCourse("defer-source", "defer source");
+
+  const turn = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "go", course: "defer-source" }),
+  });
+  assert.equal(turn.status, 200);
+
+  const deferred = await patchTitle(base, "defer-source", "Deferred Title");
+  assert.equal(deferred.status, 202, "accepted as deferred");
+  assert.ok(existsSync(dir), "nothing moves while the agent is standing there");
+
+  // Its OWN settle applies it — the good path still works.
+  await new Promise((r) => setTimeout(r, 1600));
+  assert.ok(existsSync(join(STORE, "deferred-title")), "the deferral lands on its own turn's settle");
+
+  // And a LATER read of an unrelated course does not resurrect it: `flushPending` refuses when the
+  // pending course is not the one that settled, and the TTL refuses once it is stale.
+  const other = makeTitledCourse("unrelated-course", "unrelated course");
+  const read = await fetch(`${base}/api/courses/unrelated-course`);
+  assert.equal(read.status, 200);
+  assert.ok(existsSync(other), "the unrelated course is exactly where it was");
+
+  // No rmSync here: the agent was respawned INTO `deferred-title`, and Windows refuses to remove a
+  // directory a live process is standing in. The suite's own teardown runs after every server is closed,
+  // which is when the child is actually gone.
+  void other;
+});
+
+test("a failed directory move is reported, not thrown at the learner", async (t) => {
+  // EPERM is expected whenever something holds the directory open. It used to escape as an unhandled
+  // throw, which surfaced as a raw filesystem message on the course page.
+  const { from, to } = { from: join(STORE, "does-not-exist"), to: join(STORE, "nowhere") };
+  const bridge = new ProcessBridge(from);
+  const moved = bridge.moveCourseDir(from, to);
+  assert.equal(moved.ok, false, "a failed move returns a failure");
+  assert.ok(!moved.ok && moved.error.length > 0, "with a reason");
+  bridge.kill();
+  assert.ok(!existsSync(to), "and nothing was created");
 });

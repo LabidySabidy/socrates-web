@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
 import { courseErrorView, shouldFollowRename } from "./course-error.ts";
-import { lessonModeOf, moduleAskHref } from "./grill.ts";
+import { moduleAskHref } from "./grill.ts";
 import { sessionMisconceptionLine, stripAbsolutePaths } from "./session-note.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
