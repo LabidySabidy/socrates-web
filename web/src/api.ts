@@ -204,7 +204,10 @@ export const fetchSessionStatus = () => get<SessionStatus>("/api/session");
 
 export interface HistoryResponse {
   turns: { role: "user" | "assistant"; text: string }[];
+  /** The newest session the turns came from, for the "which record is this" affordance. */
   session: string | null;
+  /** Every session the turns were assembled from, oldest first. */
+  sessions?: string[];
   truncated: boolean;
 }
 
@@ -215,7 +218,15 @@ export interface HistoryResponse {
  * server, and a half-turn was dropped there rather than marked. The client renders them exactly as it
  * renders a live settled turn, which is what keeps the two paths indistinguishable.
  */
-export const fetchHistory = (id: string) => get<HistoryResponse>(`/api/courses/${encodeURIComponent(id)}/history`);
+/**
+ * The settled transcript for ONE UNIT.
+ *
+ * The unit is required, because the endpoint derives the transcript from the sessions whose concepts belong
+ * to that unit. Without it the server cannot know which conversation to serve, and every unit rendered the
+ * same one (A1+A2).
+ */
+export const fetchHistory = (id: string, unit: number) =>
+  get<HistoryResponse>(`/api/courses/${encodeURIComponent(id)}/history?unit=${encodeURIComponent(String(unit))}`);
 
 export interface ConceptStanding {
   concept: string;

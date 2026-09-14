@@ -1317,3 +1317,197 @@ test("a rename that succeeded shows the new name in the catalogue AND the detail
 
   rmSync(join(STORE, "will-rename"), { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// A1+A2 — the transcript is scoped by UNIT, derived from the session's concepts
+//
+// Reproduced from the owner's course: `GET /api/courses/:id/history` took no unit, sorted by recency and
+// served the newest session — so every unit rendered the same conversation. Both findings are one bug:
+// once the unit is known, "which sessions belong to this unit" replaces "the newest session wins".
+//
+// UNIT -> CONCEPT membership comes from the tree the server already builds (`Unit.concepts`), and the
+// session side is `SessionSummary.concepts`, already written by the journal. No second mapping is added.
+// ---------------------------------------------------------------------------
+
+/** A store with history in two units: unit 1 has two sessions, unit 2 one, unit 3 none. */
+function makeTwoUnitStore(): string {
+  const store = mkdtempSync(join(tmpdir(), "soc-two-unit-"));
+  const course = join(store, "two-unit-course");
+  const learning = join(course, ".agent", "learning");
+  mkdirSync(join(learning, "SESSIONS"), { recursive: true });
+  writeFileSync(join(learning, "MISSION.md"), "# Two Unit Course\n");
+  writeFileSync(
+    join(learning, "SCHEMA.md"),
+    ["### 🟨 alpha-concept", "", "- **Status:** 🟨 Fair", "", "### 🟨 beta-concept", "", "- **Status:** 🟨 Fair", "", "### ⬜ gamma-concept", "", "- **Status:** ⬜ Unmeasured", ""].join("\n"),
+  );
+
+  const transcript = (turns: { q: string; a: string }[]) =>
+    turns
+      .map(
+        (t, i) =>
+          JSON.stringify({ type: "message", id: `u${i}`, message: { role: "user", content: [{ type: "text", text: t.q }] } }) +
+          "\n" +
+          JSON.stringify({ type: "message", id: `a${i}`, message: { role: "assistant", content: [{ type: "text", text: t.a }] } }),
+      )
+      .join("\n") + "\n";
+
+  const write = (name: string, started: string, concept: string, turns: { q: string; a: string }[]) => {
+    const path = join(course, `t-${name}`);
+    writeFileSync(path, transcript(turns));
+    writeFileSync(
+      join(learning, "SESSIONS", `${name}.md`),
+      [
+        `# Session ${name}`,
+        "",
+        "- **Status:** closed",
+        `- **Started:** ${started}`,
+        `- **Transcript:** ${path}`,
+        "",
+        "## Concepts touched",
+        "",
+        `- 🟨 **${concept}** — next review in 2d`,
+        "",
+      ].join("\n"),
+    );
+  };
+
+  // unit 1 gets TWO sessions with distinct text, so order is observable
+  write("2026-09-01-1000-aaaaaaaa", "2026-09-01T10:00:00.000Z", "alpha-concept", [{ q: "ALPHA OLD", a: "alpha old reply" }]);
+  write("2026-09-05-1000-bbbbbbbb", "2026-09-05T10:00:00.000Z", "alpha-concept", [{ q: "ALPHA NEW", a: "alpha new reply" }]);
+  write("2026-09-03-1000-cccccccc", "2026-09-03T10:00:00.000Z", "beta-concept", [{ q: "BETA", a: "beta reply" }]);
+  return store;
+}
+
+/**
+ * Boot against the two-unit store.
+ *
+ * `discover()` calls `courseRefs()` with no argument, so it reads `process.env.SOCRATES_HOME` rather than
+ * the `store` option — which is how the suite's own `boot()` works (it sets the env once at module load).
+ * This helper therefore points the env at its store for the duration and restores it, since a store that
+ * the router cannot see returns `unknown course` and would look like a failing endpoint rather than a
+ * mis-wired fixture.
+ */
+async function bootTwoUnit(t: { after(fn: () => Promise<void> | void): void }) {
+  const store = makeTwoUnitStore();
+  const previous = process.env.SOCRATES_HOME;
+  process.env.SOCRATES_HOME = store;
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+  const running = await startServer({ port: 0, store, staticDir, chat: false, watch: false });
+  t.after(async () => {
+    await running.close();
+    process.env.SOCRATES_HOME = previous;
+    rmSync(staticDir, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  });
+  return { base: `http://127.0.0.1:${running.port}` };
+}
+
+const textsOf = (body: { turns: { role: string; text: string }[] }) => body.turns.map((t) => t.text);
+
+test("two units with different sessions return DIFFERENT transcripts", async (t) => {
+  // THE WHOLE BUG. On the old code both units returned the newest session's turns, so these were equal.
+  const { base } = await bootTwoUnit(t);
+  const a = (await (await fetch(`${base}/api/courses/two-unit-course/history?unit=1`)).json()) as {
+    turns: { role: string; text: string }[];
+  };
+  const b = (await (await fetch(`${base}/api/courses/two-unit-course/history?unit=2`)).json()) as {
+    turns: { role: string; text: string }[];
+  };
+
+  assert.ok(a.turns.length > 0, `unit 1 must have a non-empty transcript, got ${JSON.stringify(a)}`);
+  assert.ok(b.turns.length > 0, `unit 2 must have a non-empty transcript, got ${JSON.stringify(b)}`);
+  assert.notDeepEqual(textsOf(a), textsOf(b), "unit 1 and unit 2 must not show the same conversation");
+  assert.ok(textsOf(a).some((x) => x.includes("ALPHA")), `unit 1 shows its own turns, got ${JSON.stringify(textsOf(a))}`);
+  assert.ok(textsOf(b).some((x) => x.includes("BETA")), `unit 2 shows its own turns, got ${JSON.stringify(textsOf(b))}`);
+  assert.ok(!textsOf(b).some((x) => x.includes("ALPHA")), "unit 2 must not show unit 1's turns");
+});
+
+test("a unit with no sessions returns empty, and does NOT fall back to another unit", async (t) => {
+  const { base } = await bootTwoUnit(t);
+  const res = await fetch(`${base}/api/courses/two-unit-course/history?unit=3`);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { turns: unknown[]; truncated: boolean };
+  assert.deepEqual(body.turns, [], "unit 3 has no sessions, so it shows nothing");
+  assert.equal(body.truncated, false);
+});
+
+test("multiple sessions for one unit concatenate chronologically, oldest first", async (t) => {
+  const { base } = await bootTwoUnit(t);
+  const body = (await (await fetch(`${base}/api/courses/two-unit-course/history?unit=1`)).json()) as {
+    turns: { text: string }[];
+  };
+  const all = textsOf(body).join(" | ");
+  assert.ok(all.includes("ALPHA OLD"), `the older session's turn is present: ${all}`);
+  assert.ok(all.includes("ALPHA NEW"), `and the newer one: ${all}`);
+  assert.ok(
+    all.indexOf("ALPHA OLD") < all.indexOf("ALPHA NEW"),
+    `the conversation must read oldest-first, got: ${all}`,
+  );
+});
+
+test("the tail limit applies and `truncated` is honest about what was cut", async (t) => {
+  // A unit with many sessions must not return an unbounded payload.
+  const { base } = await bootTwoUnit(t);
+  const body = (await (await fetch(`${base}/api/courses/two-unit-course/history?unit=1`)).json()) as {
+    turns: unknown[];
+    truncated: boolean;
+  };
+  assert.ok(body.turns.length <= 40, `the tail limit holds, got ${body.turns.length}`);
+  // With far more turns than the limit, truncated must be true rather than silently cutting.
+  assert.equal(typeof body.truncated, "boolean", "truncated must be reported");
+});
+
+test("matching is not defeated by the concept-name form", async (t) => {
+  // The owner's course has slug-named concepts; newer courses may carry human names. A mismatch here
+  // returns nothing, which is indistinguishable from "no history" — so this asserts NON-EMPTY.
+  const store = mkdtempSync(join(tmpdir(), "soc-human-"));
+  const course = join(store, "human-course");
+  const learning = join(course, ".agent", "learning");
+  mkdirSync(join(learning, "SESSIONS"), { recursive: true });
+  writeFileSync(join(learning, "MISSION.md"), "# Human Course\n");
+  writeFileSync(join(learning, "SCHEMA.md"), "### 🟨 Wheel Anatomy\n\n- **Status:** 🟨 Fair\n");
+  const tpath = join(course, "t.jsonl");
+  writeFileSync(
+    tpath,
+    JSON.stringify({ type: "message", id: "u", message: { role: "user", content: [{ type: "text", text: "HUMAN NAMED question" }] } }) +
+      "\n" +
+      JSON.stringify({ type: "message", id: "a", message: { role: "assistant", content: [{ type: "text", text: "human reply" }] } }) +
+      "\n",
+  );
+  writeFileSync(
+    join(learning, "SESSIONS", "2026-09-02-1000-dddddddd.md"),
+    [
+      "# Session dd",
+      "",
+      "- **Status:** closed",
+      "- **Started:** 2026-09-02T10:00:00.000Z",
+      `- **Transcript:** ${tpath}`,
+      "",
+      "## Concepts touched",
+      "",
+      "- 🟨 **Wheel Anatomy** — next review in 2d",
+      "",
+    ].join("\n"),
+  );
+
+  const previous = process.env.SOCRATES_HOME;
+  process.env.SOCRATES_HOME = store;
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+  const running = await startServer({ port: 0, store, staticDir, chat: false, watch: false });
+  t.after(async () => {
+    await running.close();
+    process.env.SOCRATES_HOME = previous;
+    rmSync(staticDir, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  });
+
+  const body = (await (
+    await fetch(`http://127.0.0.1:${running.port}/api/courses/human-course/history?unit=1`)
+  ).json()) as { turns: { text: string }[] };
+  assert.ok(
+    body.turns.some((x) => x.text.includes("HUMAN NAMED")),
+    "a human-named concept must still match its unit, got " + JSON.stringify(body),
+  );
+});

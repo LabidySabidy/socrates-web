@@ -23,7 +23,7 @@ import { existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from "
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
-import { buildCourse, WARN, type CourseTree, type CourseSource } from "./course-model.ts";
+import { buildCourse, slug, WARN, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
@@ -804,11 +804,18 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
 
     // --- journal: session history for one course -----------------------------
     /**
-     * The settled transcript for the most recent session in a course.
+     * The settled transcript for ONE UNIT, assembled from the sessions that touched it.
      *
-     * The client held the conversation in React state only, so a refresh dropped it while the data sat in
-     * pi's session file. This reads that file back. Settled turns only — see `history.ts` for why a
-     * half-turn is dropped rather than marked.
+     * It used to take no unit and serve the newest session, so every unit rendered the same conversation
+     * (A1+A2, one bug). Turn-level unit attribution is not recoverable — measured on the owner's course,
+     * none of 42 turns carries a unit and only 2 of 42 name a concept at all — but SESSION-level attribution
+     * already exists: `SessionSummary.concepts` is populated in every record, and each session resolves to
+     * one concept, hence one unit. So the unit is derived from the session's concepts rather than marked on
+     * the transcript. No per-turn marker, and the tutor's prompt is unchanged.
+     *
+     * `?unit=` is a QUERY PARAMETER rather than a path segment: the transcript is a view over a course's
+     * data, not a sub-resource of the unit, and a missing parameter then degrades to "no unit given"
+     * instead of a 404 on a route that has always been course-scoped.
      */
     const historyMatch = /^\/api\/courses\/([^/]+)\/history$/.exec(url);
     if (historyMatch && req.method === "GET") {
@@ -817,24 +824,41 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         sendJson(res, 404, { error: `unknown course: ${historyMatch[1]}` });
         return;
       }
-      // The newest session wins: a course accumulates one per sitting, and the console shows where the
-      // learner left off. Older sessions are readable through the journal.
-      const sessions = readJournal(ref.dir).sessions.filter((s) => s.transcript);
-      const newest = sessions.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
-      if (!newest?.transcript || !existsSync(newest.transcript)) {
-        sendJson(res, 200, { turns: [], session: null, truncated: false });
-        return;
-      }
+      const unitParam = new URL(req.url ?? "/", "http://localhost").searchParams.get("unit");
+      const unitNumber = unitParam === null ? Number.NaN : Number(unitParam);
       try {
-        // A long course produces a large JSONL; the console shows the recent conversation, so the tail is
-        // enough and the endpoint never loads a whole session to render one screen.
-        const raw = readFileSync(newest.transcript, "utf8");
-        const all = parseHistory(raw);
+        // The unit's concepts come from the tree the server already builds — no second mapping.
+        const tree = loadCourseTree(ref, readText);
+        const unit = Number.isFinite(unitNumber) ? tree.units.find((u) => u.n === unitNumber) : undefined;
+
+        // Sessions whose concepts intersect this unit's, matched SLUG-NORMALISED on both sides. Concepts
+        // are slug-named in existing courses and human-named in newer ones, and a name-form mismatch here
+        // would return nothing — indistinguishable from "no history".
+        const wanted = new Set(unit ? unit.concepts.map((c) => slug(c)) : []);
+        const mine = readJournal(ref.dir)
+          .sessions.filter((s) => s.transcript && s.concepts.some((c) => wanted.has(slug(c))))
+          // Chronological: the conversation must read oldest-first across sittings.
+          .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+
+        if (mine.length === 0) {
+          // No sessions for THIS unit. Deliberately empty rather than another unit's transcript.
+          sendJson(res, 200, { turns: [], session: null, truncated: false });
+          return;
+        }
+
+        const all: { role: "user" | "assistant"; text: string }[] = [];
+        for (const s of mine) {
+          if (!existsSync(s.transcript!)) continue;
+          all.push(...parseHistory(readFileSync(s.transcript!, "utf8")));
+        }
+        // The tail limit still applies, so a unit with many sittings cannot return an unbounded payload.
         const TURNS = 40;
         const turns = all.slice(-TURNS);
         sendJson(res, 200, {
           turns,
-          session: newest.file,
+          // The newest session, for the "which record is this" affordance; the turns span all of them.
+          session: mine[mine.length - 1].file,
+          sessions: mine.map((s) => s.file),
           truncated: all.length > turns.length,
         });
       } catch (err) {

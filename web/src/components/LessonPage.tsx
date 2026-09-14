@@ -210,7 +210,9 @@ export function LessonPage({
     setHistory([]);
     Promise.all([
       fetchCourse(courseId),
-      fetchHistory(courseId).catch(() => ({ turns: [], session: null, truncated: false })),
+      // A1+A2 — the unit travels with the request, and it is in the effect's deps below, so moving to
+      // another unit refetches rather than leaving the previous unit's conversation on screen.
+      fetchHistory(courseId, unitNumber ?? 1).catch(() => ({ turns: [], session: null, truncated: false })),
       fetchContinuity(courseId).catch(() => null),
     ])
       .then(([t, h, c]) => {
@@ -227,7 +229,9 @@ export function LessonPage({
       streamRef.current?.close();
       streamRef.current = null;
     };
-  }, [courseId]);
+    // `unitNumber` is a dependency because the TRANSCRIPT is per-unit: without it, moving to another unit
+    // left the previous unit's conversation on screen until a full reload.
+  }, [courseId, unitNumber]);
 
   /**
    * B1 — follow a rename while the learner is sitting in the lesson.
