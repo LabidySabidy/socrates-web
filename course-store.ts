@@ -70,21 +70,52 @@ export interface StoredCourse {
   sessions: { count: number; lastAt: string | null };
 }
 
+/**
+ * `listCourses` also reports which courses have a rename that cannot be applied.
+ *
+ * A blocked rename is visible WITHOUT touching the filesystem: the H1 wants slug X, and a directory named X
+ * already exists. Everything needed is already in hand — the H1 is read for the title, and the directory
+ * listing is what the loop iterates — so this is a Set lookup, not a move. That is why the catalogue does
+ * NOT call `reconcile`: doing so would attempt N filesystem renames on every catalogue load, and a read
+ * must not perform N mutations.
+ */
+export interface CourseList {
+  courses: StoredCourse[];
+  /** Courses whose H1 names a directory that already exists, so the move cannot happen. */
+  blockedRenames: { id: string; wanted: string; human: string }[];
+}
+
 /** Every course in the store, newest directory name first is not meaningful — order by title. */
 export function listCourses(env: NodeJS.ProcessEnv = process.env): StoredCourse[] {
-  const root = storeRoot(env);
-  if (!isDir(root)) return [];
+  return listCoursesWithRenames(env).courses;
+}
 
+/** The full listing, including which renames are blocked. */
+export function listCoursesWithRenames(env: NodeJS.ProcessEnv = process.env): CourseList {
+  const root = storeRoot(env);
+  if (!isDir(root)) return { courses: [], blockedRenames: [] };
+
+  const names = readdirSync(root).filter((n) => isDir(learningDir(join(root, n))));
+  const taken = new Set(names);
+  const blockedRenames: CourseList["blockedRenames"] = [];
   const out: StoredCourse[] = [];
-  for (const name of readdirSync(root)) {
+  for (const name of names) {
     const dir = join(root, name);
-    if (!isDir(learningDir(dir))) continue;
     let title = name;
     let concepts = 0;
     let masteryCounts: Record<string, number> = countByMastery([]);
     try {
       const data = parseLearning(dir);
-      title = data.mission.title.trim() || name;
+      const human = data.mission.title.trim() || name;
+      // The move this H1 asks for cannot happen, because another course already owns that directory. The
+      // label then derives from the DIRECTORY, so the catalogue cannot show a name the URL cannot reach.
+      const wanted = slugifySubject(human);
+      if (wanted && wanted !== name && taken.has(wanted)) {
+        blockedRenames.push({ id: name, wanted, human });
+        title = name;
+      } else {
+        title = human;
+      }
       // Unique by slug, so the catalogue agrees with the unit count the course page renders.
       const seen = new Map<string, string>();
       for (const c of data.schema.concepts) if (!seen.has(slug(c.name))) seen.set(slug(c.name), c.badge);
@@ -95,7 +126,7 @@ export function listCourses(env: NodeJS.ProcessEnv = process.env): StoredCourse[
     }
     out.push({ id: name, dir, title, concepts, masteryCounts, sessions: sessionIndex(dir) });
   }
-  return out.sort((a, b) => a.title.localeCompare(b.title));
+  return { courses: out.sort((a, b) => a.title.localeCompare(b.title)), blockedRenames };
 }
 
 /** Session recency from the SESSIONS file names — no log reads, same rule as the discovery stack had. */

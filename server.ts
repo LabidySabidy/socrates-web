@@ -37,6 +37,7 @@ import {
   reconcileCourse,
   slugifySubject,
   storeRoot,
+  listCoursesWithRenames,
   validateTitle,
   writeMissionTitle,
   TITLE_MAX,
@@ -650,9 +651,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     // --- courses -------------------------------------------------------------
     if (url === "/api/courses" && req.method === "GET") {
       const result = discover();
+      // B3 one level up — the catalogue gets the same rule as the detail read, and the same warning
+      // channel. `listCoursesWithRenames` derived this from the H1 and the directory listing it already
+      // reads, so NO filesystem move happens here: a read must not perform N renames to render a list.
+      const listing = listCoursesWithRenames(storeEnv);
+      const renameWarnings = listing.blockedRenames.map((b) =>
+        WARN.renameBlocked(`a course called "${b.wanted}" already exists — "${b.id}" keeps its directory name`),
+      );
       sendJson(res, 200, {
         root: result.root,
-        warnings: result.warnings,
+        warnings: [...result.warnings, ...renameWarnings],
         courses: result.courses,
       });
       return;

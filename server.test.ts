@@ -1253,3 +1253,67 @@ test("the failed-rename warning names the reason and the intended name", async (
   rmSync(join(STORE, "locked"), { recursive: true, force: true });
   rmSync(join(STORE, "taken"), { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// B3 one level up — the catalogue must not show a name the course's URL cannot reach
+//
+// `GET /api/courses` serves `discover()` straight through, and the label is derived from the H1 alone, so a
+// blocked rename gave the catalogue "Taken" while `#/course/locked` gave "Locked": two screens, two names,
+// one course. The rule is the same as the detail read — the name derives from the DIRECTORY when the move
+// could not happen — but the COST is different: the list endpoint must not attempt N moves per load.
+// ---------------------------------------------------------------------------
+
+test("a blocked rename gives the catalogue a label consistent with the id, plus a warning", async (t) => {
+  const { base } = await boot(t);
+  makeCollidingCourse("taken", "taken");
+  makeCollidingCourse("locked", "taken"); // wants to become `taken`, which exists
+
+  const body = (await (await fetch(`${base}/api/courses`)).json()) as {
+    courses: { id: string; label: string; title: string }[];
+    warnings: string[];
+  };
+  const locked = body.courses.find((c) => c.id === "locked");
+  assert.ok(locked, `expected the course in the catalogue: ${JSON.stringify(body.courses.map((c) => c.id))}`);
+
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  assert.equal(
+    slug(locked!.label),
+    locked!.id,
+    `catalogue label "${locked!.label}" and id "${locked!.id}" disagree — the catalogue shows a name the URL cannot reach`,
+  );
+  assert.ok(
+    body.warnings.some((w) => /rename/i.test(w)),
+    `the blocked rename must be visible in the catalogue, got ${JSON.stringify(body.warnings)}`,
+  );
+
+  rmSync(join(STORE, "locked"), { recursive: true, force: true });
+  rmSync(join(STORE, "taken"), { recursive: true, force: true });
+});
+
+test("a rename that succeeded shows the new name in the catalogue AND the detail read", async (t) => {
+  // The guard against freezing labels to directory names: when a move CAN happen, both surfaces must
+  // report the new, human name.
+  const { base } = await boot(t);
+  const dir = join(STORE, "will-rename");
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    ["# Will Rename", "", "## Destination", "", "- **I will be able to:** x", ""].join("\n"),
+  );
+  writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 a-concept\n\n- **Status:** 🟨 Fair\n");
+
+  // The read reconciles and the directory moves.
+  assert.equal((await fetch(`${base}/api/courses/will-rename`)).status, 200);
+
+  const list = (await (await fetch(`${base}/api/courses`)).json()) as {
+    courses: { id: string; label: string }[];
+  };
+  const entry = list.courses.find((c) => c.id === "will-rename");
+  assert.ok(entry, `expected the renamed course: ${JSON.stringify(list.courses.map((c) => c.id))}`);
+  assert.equal(entry!.label, "Will Rename", "the catalogue shows the human name, not the directory slug");
+
+  const detail = (await (await fetch(`${base}/api/courses/will-rename`)).json()) as { title: string };
+  assert.equal(detail.title, "Will Rename", "and the detail read agrees");
+
+  rmSync(join(STORE, "will-rename"), { recursive: true, force: true });
+});
