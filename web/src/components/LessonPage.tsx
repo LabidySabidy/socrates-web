@@ -34,6 +34,14 @@ import {
   PASSIVITY_MESSAGE,
   refusalReason,
 } from "../passivity.ts";
+/**
+ * The composer's growth cap, in px. MUST match `.composer textarea { max-height }` in theme.css — the
+ * stylesheet owns the number and this reads it at runtime so the two cannot drift.
+ */
+const COMPOSER_MAX_PX = Number(
+  getComputedStyle(document.documentElement).getPropertyValue("--composer-max") || 150,
+);
+
 interface ChatResponse {
   accepted?: boolean;
   course?: string;
@@ -98,6 +106,8 @@ export function LessonPage({
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** F3 — the composer sizes itself to its content, up to the CSS cap. */
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   /** A dispatched prompt fires exactly once per arrival, however many times the component re-renders. */
   const dispatched = useRef<string | null>(null);
   /**
@@ -267,6 +277,23 @@ export function LessonPage({
   const blocked = refusalReason(intercept, input) === "passive";
   const tutorDown = tutor !== null && tutor.chat && !tutor.ok;
   const canSend = maySubmit(intercept, input) && !busy && !tutorDown;
+
+  /**
+   * F3 — grow the composer with its content, up to the cap the stylesheet already declares.
+   *
+   * The textarea was fixed at one row while `max-height` sat unused, so an 8-line draft lived in a 42px
+   * window (measured: scrollHeight 199 / clientHeight 42). Text was never lost — it scrolled — but a learner
+   * could not see what they had written.
+   *
+   * The height is reset to "auto" BEFORE measuring: without that, `scrollHeight` never reports less than the
+   * current height and the composer only ever grows, staying tall after a send.
+   */
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+  }, [input]);
 
   /**
    * Dispatch an arriving prompt: seed the composer so the learner can SEE what is being asked on their
@@ -554,6 +581,7 @@ export function LessonPage({
 
       <div className="composer">
         <textarea
+          ref={composerRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {

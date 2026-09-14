@@ -20,6 +20,8 @@
    * treatment can pass on both surfaces.
    */
   --ink-label: rgba(32, 31, 29, 0.66);
+  /** The composer's growth cap. Read by LessonPage so the JS clamp and this rule cannot drift. */
+  --composer-max: 150;
 
   --rule: rgba(32, 31, 29, 0.12);
   --rule-soft: rgba(32, 31, 29, 0.07);
@@ -449,7 +451,7 @@ button.primary:hover { background: var(--action-tint); }
   background: var(--surface);
   color: var(--ink);
   resize: none;
-  max-height: 150px;
+  max-height: calc(var(--composer-max) * 1px);
   min-height: 42px;
 }
 .composer textarea::placeholder { color: var(--ink-45); }
