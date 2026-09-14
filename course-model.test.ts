@@ -443,3 +443,29 @@ test("two modules share a visible title, so their accessible names must differ",
   assert.ok(new Set(visible).size < visible.length, "the premise: some visible titles repeat");
   assert.equal(new Set(accessible).size, accessible.length, "…and every accessible name is distinct");
 });
+
+test("a quiz module's title is humanised, not the raw unit id", () => {
+  // A1: this built its display string from `unit.title`, so a quiz on a slug-named unit rendered
+  // `suspension-angle-vocabulary quiz` while the module titles a few lines away were already human.
+  const dir = mkdtempSync(join(tmpdir(), "soc-quiz-title-"));
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "COURSE.md"),
+    [
+      "# Course",
+      "",
+      "## Unit 1: suspension-angle-vocabulary",
+      "",
+      "- **Quiz** 2 items",
+      "",
+    ].join("\n"),
+  );
+  const course = buildCourse(load2(dir));
+  const all = course.units.flatMap((u) => u.groups.flatMap((g) => g.modules));
+  const quiz = all.find((m) => m.type === "quiz");
+
+  assert.ok(quiz, `expected a quiz module; got ${JSON.stringify(all.map((m) => `${m.type}:${m.title}`))}`);
+  assert.equal(quiz!.title, "Suspension Angle Vocabulary quiz", "the display title is human");
+  assert.equal(quiz!.id, "suspension-angle-vocabulary/quiz", "the id keeps the raw name");
+  rmSync(dir, { recursive: true, force: true });
+});

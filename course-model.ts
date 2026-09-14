@@ -613,7 +613,9 @@ export function parseCourseManifest(
       group.modules.push({
         id: `${slug(unit.title)}/quiz`,
         type: "quiz",
-        title: `${unit.title} quiz`,
+        // Display string built here, so the name is humanised here — the JSX cannot know which part of
+        // the sentence is an identifier. The `id` above keeps the raw title, because it is an id.
+        title: `${humanize(unit.title)} quiz`,
         items: Number(quizMatch[1]),
       });
       continue;

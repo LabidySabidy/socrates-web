@@ -1292,37 +1292,85 @@ test("the three accessible names differ, though two visible titles are identical
 // the render-site guard: an identifier must not reach JSX
 // ---------------------------------------------------------------------------
 
-test("no component prints a raw concept or unit identifier", () => {
-  // The failure mode this feature is most likely to have is fixing one surface and missing four, so the
-  // rule is checked mechanically rather than by eye. Each entry is a raw identity expression that has a
-  // display name available; printing it unwrapped puts a slug in front of the learner.
-  const components = readdirSync(join(import.meta.dirname, "components")).filter((f) => f.endsWith(".tsx"));
-  const raw = [
-    "{u.title}",
-    "{unit.title}",
-    "{unit?.title ??",
-    "{selected.title}",
-    "{c.name}",
-    "{row.concept}",
-    "{mod.concept}",
-    "s.concepts.join(",
-    "concepts.join(",
-  ];
+/**
+ * The render-site guard.
+ *
+ * HONEST LIMIT: this is a TEXT SCAN over source files. It catches the shapes an identifier has taken
+ * before — `{unit.title}` in JSX, `${card.name}` in a template literal — and it cannot catch a string
+ * assembled at runtime (a `join` over data, a value passed through three functions). It is a net for the
+ * known ways this bug appears, not a proof that none exists. Widened from `components/*.tsx` to the model
+ * because display strings are ALSO assembled server-side, which is how `"${unit.title} quiz"` survived a
+ * guard that only looked at the client.
+ */
+function scanForRawIdentifiers(
+  files: { path: string; label: string }[],
+  needles: string[],
+  exemptLines: Set<string>,
+): string[] {
   const offenders: string[] = [];
-  for (const file of components) {
-    const source = readFileSync(join(import.meta.dirname, "components", file), "utf8");
-    for (const needle of raw) {
-      let from = source.indexOf(needle);
-      while (from !== -1) {
-        // `key={c.name}` is an identity, not display: React keys SHOULD be the raw id, so an occurrence
-        // immediately preceded by `key=` is correct code rather than an offender.
-        const before = source.slice(Math.max(0, from - 4), from);
-        if (before !== "key=") offenders.push(`${file}: ${needle}`);
-        from = source.indexOf(needle, from + 1);
+  const seenExempt = new Set<string>();
+  for (const { path, label } of files) {
+    const source = readFileSync(path, "utf8");
+    for (const line of source.split("\n")) {
+      const trimmed = line.trim();
+      if (exemptLines.has(trimmed)) {
+        seenExempt.add(trimmed);
+        continue;
+      }
+      for (const needle of needles) {
+        if (trimmed.includes(needle)) offenders.push(`${label}: ${needle}  ->  ${trimmed.slice(0, 90)}`);
       }
     }
   }
-  assert.deepEqual(offenders, [], `these print an identifier instead of a display name: ${offenders.join(", ")}`);
+  // A stale exemption is a hole in the guard, so it fails rather than sitting there looking reassuring.
+  const stale = [...exemptLines].filter((l) => !seenExempt.has(l));
+  return offenders.concat(stale.map((l) => `STALE EXEMPTION (no longer in the source): ${l}`));
+}
+
+test("no component prints a raw concept or unit identifier", () => {
+  const dir = join(import.meta.dirname, "components");
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith(".tsx"))
+    .map((f) => ({ path: join(dir, f), label: f }));
+  const offenders = scanForRawIdentifiers(
+    files,
+    [
+      "{u.title}",
+      "{unit.title}",
+      "{unit?.title ??",
+      "{selected.title}",
+      "{c.name}",
+      "{row.concept}",
+      "{mod.concept}",
+      "s.concepts.join(",
+      "concepts.join(",
+    ],
+    // `key={c.name}` is an identity, not display: React keys SHOULD be the raw id. It is handled by
+    // shape rather than exemption because the needle `{c.name}` is a substring of `key={c.name}`.
+    new Set(),
+  ).filter((o) => !o.includes("key={c.name}") && !o.includes("key={u.name}"));
+  assert.deepEqual(offenders, [], `these print an identifier instead of a display name:\n${offenders.join("\n")}`);
+});
+
+test("no module assembles a display string from a raw identifier", () => {
+  // The model builds titles by concatenation, which is exactly where A1 hid. `${name}` is in the needle
+  // list, and the two exemptions below are the only legitimate uses — both build machine-readable warning
+  // CODES, which are matched on rather than read.
+  const root = join(import.meta.dirname, "..", "..");
+  const modelFiles = ["course-model.ts", "interactives.ts", "assessments.ts", "journal.ts", "server.ts"];
+  const files = modelFiles.map((f) => ({ path: join(root, f), label: f }));
+  const exempt = new Set([
+    "duplicateConcept: (name: string) => `duplicate-concept:${name}`,",
+    "unknownLesson: (name: string) => `unknown-lesson:${name}`,",
+    "manifestDuplicate: (name: string) => `manifest-duplicate:${name}`,",
+    "badParam: (name: string, reason: string) => `parameter-invalid:${name}:${reason}`,",
+  ]);
+  const offenders = scanForRawIdentifiers(
+    files,
+    ["${unit.title}", "${card.name}", "${c.name}", "${concepts}", "${name}", "${unit?.title}"],
+    exempt,
+  );
+  assert.deepEqual(offenders, [], `these build display text from an identifier:\n${offenders.join("\n")}`);
 });
 
 test("every component that humanises actually imports the function", () => {
