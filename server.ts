@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
+import { adoptGlobal, ensureHome, preflight, resolveProvider } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import {
   courseRefs,
@@ -85,6 +86,11 @@ export interface ServerOptions {
   chat?: boolean;
   /** Hot-reload watchers per course. Off in tests. */
   watch?: boolean;
+  /**
+   * Compose the app's own tutor session. `false` leaves the bridge bare, which is what the mock-driven
+   * chat tests need; the default composes it so a running app always owns its tutor.
+   */
+  session?: boolean;
 }
 
 export interface RunningServer {
@@ -176,6 +182,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     console.warn(`[static] ${publicDir} does not exist — run \`npm run build\` (web/ has its own build)`);
   }
   const chatEnabled = opts.chat !== false;
+  /** `session: false` composes nothing (tests that drive mocks); the default composes the app's own. */
   const watchEnabled = opts.watch !== false;
 
   const readText = (p: string): string | null => {
@@ -232,7 +239,41 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   let pendingReconcile: string | null = null;
   /** The title a deferred rename was asked for, applied at the same moment the move runs. */
   let pendingTitle: string | null = null;
-  const bridge = new ProcessBridge(store);
+  /**
+   * The app's OWN tutor session, composed once here and printed so it can never hide. `chat: false`
+   * (tests) skips it entirely — no preflight, no adoption, no spawn.
+   */
+  const session =
+    chatEnabled && opts.session !== false
+      ? (() => {
+          // First run: adopt the user's provider, model and credentials ONCE. After that the app owns its
+          // config and never reads the global one again. Re-runnable on purpose — credentials rotate, and
+          // a stale copy surfaces as a 401 that reads like a broken app.
+          // Materialise the home from what the repo ships, then adopt, then check. Order matters: the
+          // preflight checks the HOME, so the assets must be in it first.
+          const prepared = ensureHome(storeEnv);
+          if (!prepared.ok) for (const problem of prepared.problems) console.error(`[session] ${problem}`);
+          let pre = preflight(storeEnv);
+          if (!pre.ok && pre.problems.some((p) => p.includes("credentials") || p.includes("no provider"))) {
+            const adopted = adoptGlobal(storeEnv);
+            console.log(`[session] ${adopted.ok ? "adopted" : "adoption skipped"}: ${adopted.message}`);
+            if (adopted.ok) pre = preflight(storeEnv);
+          }
+          console.log(
+            `[session] home=${pre.session.assetPaths.home} model=${pre.session.provider.provider || "?"}/${pre.session.provider.model || "?"} (${pre.session.provider.source})`,
+          );
+          if (!pre.ok) {
+            // LOUDLY, and with every missing thing named. A lesson that sits silent with no tutor is the
+            // failure this prevents, and there is deliberately no silent fallback to the global harness —
+            // a fallback that restores the old coupling is how the original bug comes back.
+            console.error("[session] PREFLIGHT FAILED — the tutor cannot start:");
+            for (const problem of pre.problems) console.error(`  - ${problem}`);
+          }
+          return pre;
+        })()
+      : null;
+
+  const bridge = new ProcessBridge(store, session ? { env: session.session.env, args: session.session.args } : null);
 
   function finalize(kind: "done" | "error", detail?: unknown): void {
     const wasSettled = settled;
@@ -1188,6 +1229,26 @@ ${BUDAPEST_MODIFIER}` : message;
         } else {
           hs(currentTurn, `CLOSE ${tag} (was not the live subscriber)`);
         }
+      });
+      return;
+    }
+
+    /**
+     * What tutor this app is running as, and what is wrong if it cannot start.
+     *
+     * A lesson that sits silent with no tutor is the failure this prevents, so the client asks before
+     * offering a composer. It reports the composed session rather than the ambient one: there is no
+     * fallback, so this IS the answer.
+     */
+    if (url === "/api/session") {
+      sendJson(res, 200, {
+        chat: chatEnabled,
+        ok: session ? session.ok : false,
+        problems: session ? session.problems : ["this server was started without a tutor session"],
+        provider: session?.session.provider.provider ?? null,
+        model: session?.session.provider.model ?? null,
+        source: session?.session.provider.source ?? null,
+        home: session?.session.assetPaths.home ?? null,
       });
       return;
     }

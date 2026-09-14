@@ -763,3 +763,15 @@ a.mod:hover { text-decoration: none; }
   display: block;
   margin-top: 6px;
 }
+
+/* The tutor could not start. Loud, because the alternative is a silent lesson. */
+.tutor-down {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--warning-strong, #b45309);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 14px 16px;
+  margin: 0 0 12px;
+}
+.tutor-down p { margin: 0 0 8px; }
+.tutor-down ul { margin: 0 0 8px 18px; }

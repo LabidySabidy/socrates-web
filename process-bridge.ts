@@ -15,7 +15,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
 
-function resolvePiCli(): string {
+/** Exported so a test can spawn the SAME binary the bridge would, rather than its own guess. */
+export function resolvePiCli(): string {
   // The pi package is ESM-only — its `exports` map has no "require" condition,
   // so require.resolve() throws ERR_PACKAGE_PATH_NOT_EXPORTED. import.meta.resolve
   // honors the "import" condition. Resolve the main entry, walk to the package
@@ -38,6 +39,8 @@ export class ProcessBridge {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly bin: string;
   private readonly args: string[];
+  /** The composed session (session.ts): the child's env and its argv beyond the CLI path. */
+  private readonly session: { env: NodeJS.ProcessEnv; args: string[] } | null;
   /** Mutable: this IS which course the tutor can read and write. */
   private cwd: string;
   private cliPath: string | null = null;
@@ -48,8 +51,9 @@ export class ProcessBridge {
   private shuttingDown = false;
   private busy = false;
 
-  constructor(cwd: string) {
+  constructor(cwd: string, session: { env: NodeJS.ProcessEnv; args: string[] } | null = null) {
     this.cwd = cwd;
+    this.session = session;
     // Default runtime: the current node process running the bundled pi CLI
     // (declared dependency). PI_BIN/PI_ARGS remain escape hatches — e.g. tests
     // set PI_BIN=node and PI_ARGS=test/mock-pi.mjs to bypass the real agent.
@@ -109,7 +113,9 @@ export class ProcessBridge {
   private buildArgs(): string[] {
     if (this.args.length) return this.args; // explicit PI_ARGS override (tests)
     if (this.cliPath === null) this.cliPath = resolvePiCli();
-    return [this.cliPath, "--mode", "rpc"];
+    // The composed session supplies everything after the binary: `--mode rpc --no-context-files
+    // --model <p>/<m>`. Without it (a bare bridge in a test) fall back to rpc mode alone.
+    return [this.cliPath, ...(this.session?.args ?? ["--mode", "rpc"])];
   }
 
   private spawn(): void {
@@ -127,6 +133,9 @@ export class ProcessBridge {
     const child: ChildProcessWithoutNullStreams = spawn(this.bin, args, {
       cwd: this.cwd,
       windowsHide: true,
+      // The composed env carries PI_CODING_AGENT_DIR, which is what isolates the tutor from the
+      // developer's harness or any other global pi config.
+      ...(this.session ? { env: this.session.env } : {}),
     });
     this.child = child;
 

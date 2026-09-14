@@ -506,3 +506,56 @@ handshake question should start by reading it.
       distinction is the label *beneath*, and a screen reader has no beneath, so `moduleRingLabel` folds
       the type back in for `aria-label` only.
       **Done** — 136 server (up from 134) + 98 client (up from 96).
+
+## T-057 — `telemetry_missing` fires on a grill turn that had nothing to record
+
+**Status:** open, reproduced on a real grill turn 2026-09-14. Found by D7's full-loop acceptance.
+
+**Symptom.** A grill turn that is still probing records
+`{"kind":"telemetry_missing","reason":"grill-turn-without-telemetry"}` and a
+`telemetry-errors.log` entry, even though nothing was wrong.
+
+**Evidence.**
+- The shipped learning extension decides on `agent_end`: if no telemetry arrived this turn AND
+  `detectGrillTurn()` is true, it records the gap (`pi/extensions/learning/index.ts:245-260`).
+- `detectGrillTurn` is true whenever the last user message contains `<skill name="grill-misconception"`
+  (`pi/extensions/learning/signal.ts:56-63`) — i.e. for EVERY grill turn.
+- The skill instructs the opposite: emit a block "when — and only when — a concept's proficiency changes,
+  or a misconception is detected or resolved… If nothing changed, emit no block at all."
+- Observed on four consecutive grill exchanges: the tutor probed the learner's wrong model (correct
+  behaviour), never delivered a verdict, emitted no block — and the log recorded a gap on each.
+- The pipeline itself is fine: a compliant reply parses and validates
+  (`blocks found: 1`, `validated: Tension 🟨`) via `extractTelemetry` + `validateTelemetry`.
+
+**Why it matters.** The signal is the only way to detect a genuinely broken pipeline, and it fires on
+normal operation, so it cannot be trusted. It also writes a warning into the learner's course directory
+for nothing.
+
+**Fix direction (not built).** Either narrow the trigger — record the gap only when the grill turn
+CONCLUDED (a verdict was reached) and still emitted nothing — or have the skill emit a no-op marker on a
+probing turn. The first is better: the second trains the model to emit blocks that say nothing.
+
+## T-058 — `feynman-recite` is served in NO configuration
+
+**Status:** open, filed 2026-09-14 from the Part D spike. Not fixed here by instruction; recorded so it
+cannot be mistaken for part of the isolation change.
+
+**Symptom.** The skill that the `Recite <concept>` module dispatches is never available to the tutor, so a
+recite click cannot start the skill it names.
+
+**Evidence (spike, real spawned children).**
+- The real harness served **10 skills**; `feynman-recite` was not among them.
+- An app-owned config dir with all three skill files present served **2 skills** (`scaffold-learning`,
+  `grill-misconception`).
+- Three explicit `--skill <file>` flags naming it, and `--skill <dir>` covering its directory, both served
+  the same two skills — it appeared in NONE of the configurations tried.
+- Its frontmatter is well-formed and does NOT set `disable-model-invocation`, so the exclusion is not the
+  same mechanism that hides `scaffold-learning` from model self-selection.
+
+**Consequence for this app.** `web/src/components/CoursePage.tsx:20` lists `recite` in
+`TUTOR_MODULE_TYPES`, so the module row opens the lesson — and the lesson dispatches
+`/skill:feynman-recite`, which resolves to nothing. The visible effect is a lesson whose tutor has no
+instructions for the task it was asked to run.
+
+**Fix direction (not investigated).** Diff its frontmatter and file shape against a skill that IS served to
+find the exclusion, and check whether the dispatcher filters on something other than the frontmatter.

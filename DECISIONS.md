@@ -440,3 +440,66 @@ URL may 404, and now it 404s legibly.
 
 **Tradeoffs:** a stale page after a deferred rename must be reloaded. Accepted: the alternative is
 interrupting a running tutor turn to move a directory out from under it.
+
+## 2026-09-14 — The app composes its own tutor session, and adopts the user's model once
+
+**Context:** the tutor was whatever `pi` happened to be on the machine. It inherited `~/.pi/agent` — the
+developer's `AGENTS.md`, `STANDARDS.md`, `LESSONS.md`, every installed skill, and the project instructions
+of whatever repository the session sat in. Reproduced verbatim on a bicycle-wheel course: the learner was
+read "**Context loaded:** global `AGENTS.md`, `STANDARDS.md`, `LESSONS.md`", "Parser contract gone …
+learning-parser.ts", "Scaffold written. Verified by running the app's own learning-parser.ts", and the
+skill file's own process notes — "Push for a concrete deliverable, not 'understand wheels.' Good answers
+look like: …", "**Step 3 — The 20-hour deconstruction.** … Marks: ★ = I judge these carry ~80% of the
+result." The last two are instructions to the model, spoken at the learner.
+
+**Decision:** the app ships and owns its session. `session.ts` is the only thing that constructs one.
+
+1. **The app's pi home is in the repo** — `pi/extensions/{learning,passivity}`, `pi/skills/` and
+   `pi/templates/learning/` — and materialised at runtime into `~/.socrates/pi` (beside the store, so
+   `SOCRATES_HOME` redirects it and tests never touch a real one). `ensureHome` overwrites the shipped
+   assets on every start so they cannot drift, and never touches `auth.json` or `session.json`.
+2. **`PI_CODING_AGENT_DIR` is the whole isolation mechanism.** Measured on real spawned children: the
+   real harness served 10 skills and 7 extensions; the app-owned home served 2 skills and 2 extensions
+   and none of the harness. `--mode rpc --no-context-files --model <provider>/<id>` is the entire argv —
+   no `--no-extensions`, `-e`, `--skill`, `--system-prompt` or `PI_OFFLINE`, because those were measured
+   as either no-ops or harmful, and each addition is another way to break a working spawn.
+   `--no-context-files` earns its place: it stops pi reading an `AGENTS.md` above the course directory.
+3. **The model is passed EXPLICITLY, never inferred.** pi resolves its default from its CACHED catalog
+   (`models-store.json`), not `settings.json`, so an app-owned home with no cache silently ignores the
+   configured default: identical config dirs produced `openrouter/moonshotai/kimi-k2.6` (settings only),
+   `anthropic/claude-opus-4-8` (+auth), `deepseek/deepseek-flash` (+models-store). The app therefore
+   passes `--model`, which won in every configuration, including with no cache at all.
+4. **The app ADOPTS the user's provider, model and credentials once, then owns its config and never reads
+   the global one again.** This supersedes "the bridge inherits `~/.pi/agent/settings.json` live".
+   Adoption is explicit and RE-RUNNABLE: credentials rotate, and a stale copy produces a 401 that reads
+   as a broken app. `models-store.json` is deliberately not copied — the model travels on the command
+   line, so the app does not inherit a catalog it does not manage.
+5. **A preflight runs at startup and fails loudly, naming every missing thing.** The UI surfaces it and
+   disables the composer, because a lesson that sits silent with no tutor is the failure this prevents.
+   There is deliberately NO fallback to the global harness: a fallback that restores the old coupling is
+   how this bug returns.
+
+**Alternatives considered:** keeping the harness read live and filtering what it says (rejected — the
+tutor still knows about files the learner has no concept of); replacing the system prompt (rejected — it
+carries the tool snippets and guidelines extensions opt into, so the tutor would lose the ability to write
+course files); seeding `settings.json` and hoping (disproved by measurement above).
+
+**Tradeoffs:** the app now carries ~90KB of extension source and must be re-materialised per start. In
+exchange the tutor's whole world is defined by this repo, and a second machine needs no hand-installed
+harness — which is the prerequisite this app always lacked.
+
+## 2026-09-14 — The harness no longer carries the app's extensions
+
+**Context:** `~/.pi/agent/extensions/{learning,passivity}` were the originals the app shipped, and they
+served EVERY project's pi session, not just the app's. With the app owning its copies, keeping them was
+duplication that would drift.
+
+**Decision:** removed in one commit (`923eb2d` in the harness repo), after proving the app works with the
+global harness unreachable. What this cost, recorded rather than discovered later: any project whose pi
+session relied on these files no longer records learning telemetry or emits the passivity notify. The
+developer's own sessions keep the rest of the harness. `run-extension-tests.mjs` REFUSED until its
+declared list matched, which is the guard behaving correctly.
+
+**Alternatives considered:** leaving them for the developer's own use — rejected: two copies that drift is
+the failure mode this pairs with, and the app no longer reads them, so "keep for compatibility" would
+preserve a path nothing uses.

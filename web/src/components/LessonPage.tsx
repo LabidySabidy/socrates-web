@@ -9,7 +9,7 @@
  * module pane's scroll position.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchCourse } from "../api.ts";
+import { fetchCourse, fetchSessionStatus, type SessionStatus } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
 import { courseErrorView, shouldFollowRename } from "../course-error.ts";
@@ -61,6 +61,11 @@ export function LessonPage({
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /**
+   * D3 — the tutor's own status. A lesson whose tutor cannot start must say so where the composer is,
+   * rather than offering a box that silently does nothing.
+   */
+  const [tutor, setTutor] = useState<SessionStatus | null>(null);
   /** The sprint gate: 300 seconds of frozen composer, no backend state. */
   const [gateOpen, setGateOpen] = useState(false);
   const [remaining, setRemaining] = useState(REST_SECONDS);
@@ -87,6 +92,20 @@ export function LessonPage({
   useEffect(() => {
     setError(null);
   }, [courseId, unitNumber]);
+
+  useEffect(() => {
+    let alive = true;
+    fetchSessionStatus()
+      .then((s) => {
+        if (alive) setTutor(s);
+      })
+      .catch(() => {
+        /* an unreachable status endpoint leaves the composer as it was; the chat will say so */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /**
    * B2 — one navigation per rename, and never while a turn is running.
@@ -159,7 +178,8 @@ export function LessonPage({
   const { prose, token } = splitAtGate(rawProse);
   const frozen = isFrozen(gateOpen, remaining);
   const blocked = refusalReason(intercept, input) === "passive";
-  const canSend = maySubmit(intercept, input) && !busy && !frozen;
+  const tutorDown = tutor !== null && tutor.chat && !tutor.ok;
+  const canSend = maySubmit(intercept, input) && !busy && !frozen && !tutorDown;
 
   // Open once, on the first turn that carries a token.
   useEffect(() => {
@@ -391,6 +411,26 @@ export function LessonPage({
           {isSilent(turn) && !busy && prose === "" ? null : null}
         </div>
       </div>
+
+      {tutorDown ? (
+        <div className="tutor-down" role="alert">
+          <p>
+            <strong>The tutor cannot start.</strong>{" "}
+            {tutor!.problems[0] ?? "Its session could not be composed."}
+          </p>
+          {tutor!.problems.length > 1 ? (
+            <ul>
+              {tutor!.problems.slice(1).map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="eyebrow">
+            This app runs its own tutor session and never falls back to your global pi install, so the
+            lesson will stay silent until this is fixed.
+          </p>
+        </div>
+      ) : null}
 
       <div className="composer">
         <textarea

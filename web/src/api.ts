@@ -183,3 +183,21 @@ export async function renameCourse(id: string, title: string): Promise<RenameRes
     deferred: body.deferred === true,
   };
 }
+
+export interface SessionStatus {
+  chat: boolean;
+  ok: boolean;
+  problems: string[];
+  provider: string | null;
+  model: string | null;
+  source: string | null;
+  home: string | null;
+}
+
+/**
+ * Which tutor this app will run as, and what is missing if it cannot start.
+ *
+ * Asked before a lesson offers a composer: a disabled tutor with no explanation is the "looks broken"
+ * failure, and this app has no fallback to the ambient pi install by design.
+ */
+export const fetchSessionStatus = () => get<SessionStatus>("/api/session");
