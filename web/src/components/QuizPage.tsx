@@ -10,7 +10,7 @@ import { fetchAssessments, fetchCourse, generateAssessments, recordResult } from
 import { completionView, type CompletionView } from "../completion.ts";
 import type { AssessmentsResponse } from "../assessment-types.ts";
 import type { CourseTree, Unit } from "../types.ts";
-import { hrefCourse } from "../router.ts";
+import { hrefCourse, hrefHome } from "../router.ts";
 import {
   actionLabel,
   canSkip,
@@ -30,7 +30,7 @@ import {
 } from "../quiz.ts";
 import { gradingMode } from "../assessment-types.ts";
 import { humanize } from "../humanize.ts";
-import { humanMessage } from "../course-error.ts";
+import { humanMessage, materialFailureView } from "../course-error.ts";
 
 export function QuizPage({
   courseId,
@@ -48,6 +48,8 @@ export function QuizPage({
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [completion, setCompletion] = useState<CompletionView | null>(null);
+  /** B2a — who to blame and whether to offer a retry. Set by the classification, not hardcoded. */
+  const [material, setMaterialError] = useState<ReturnType<typeof materialFailureView> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -61,13 +63,17 @@ export function QuizPage({
       })
       .catch((err: unknown) => {
         if (!alive) return;
+        // B2a — this catch covers BOTH fetches, so it cannot assume the quiz is what failed. The
+        // classifier decides who to blame and whether a retry is worth offering.
+        const view = materialFailureView(err, "quiz");
+        setMaterialError(view);
         setData({
           unit: unitNumber,
           source: "none",
           items: [],
           warnings: [],
-          error: "could not load the quiz",
-          detail: err instanceof Error ? err.message : String(err),
+          error: view.heading,
+          detail: view.detail,
         });
       })
       .finally(() => {
@@ -196,16 +202,25 @@ export function QuizPage({
           </button>
         </nav>
         <main className="page">
-          <h1 className="display greeting">This quiz could not be prepared</h1>
-          <p className="greeting-sub reading">{humanMessage(data.error)}</p>
-          {data.detail ? <p className="notice">{humanMessage(data.detail)}</p> : null}
+          {/* B2a — the headline comes from the CLASSIFICATION, so a course that cannot be read is not
+              reported as a quiz problem. `material` is set by the catch; on a generation failure the
+              heading names the quiz, which is correct. */}
+          <h1 className="display greeting">{material?.heading ?? "This quiz could not be prepared"}</h1>
+          <p className="greeting-sub reading">{humanMessage(data.detail ?? data.error)}</p>
           {/* A SUMMARY of what arrived, never the model's text: when it has produced items that text IS
               the answer key. A `p`, not a `pre` — this is a sentence, not a code sample. */}
           {data.excerpt ? <p className="notice excerpt-summary">{data.excerpt}</p> : null}
           <div className="quiz-actions">
-            <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
-              {generating ? "Generating…" : "Try generating again"}
-            </button>
+            {/* Offered ONLY when regenerating could help. A course that cannot be read is not fixed by
+                generating again, so the remedy is the link back below, not this button. */}
+            {material?.retryable !== false ? (
+              <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
+                {generating ? "Generating…" : "Try generating again"}
+              </button>
+            ) : null}
+            <a className="primary" href={hrefHome()}>
+              ← Back to the library
+            </a>
           </div>
         </main>
       </div>

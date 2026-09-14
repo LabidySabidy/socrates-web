@@ -11,11 +11,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { humanize } from "../humanize.ts";
-import { humanMessage } from "../course-error.ts";
+import { humanMessage, materialFailureView } from "../course-error.ts";
 import { fetchCourse, fetchInteractives, generateInteractives } from "../api.ts";
 import type { Interactive, InteractivesResponse, SliderSpec, TargetWindowSpec } from "../interactives-types.ts";
 import type { CourseTree, Unit } from "../types.ts";
-import { hrefCourse } from "../router.ts";
+import { hrefCourse, hrefHome } from "../router.ts";
 import { compile, sample } from "../expr.ts";
 import {
   accuracy,
@@ -190,6 +190,8 @@ export function LabPage({
   const [tree, setTree] = useState<CourseTree | null>(null);
   const [data, setData] = useState<InteractivesResponse | null>(null);
   const [tab, setTab] = useState(0);
+  /** B2a — who to blame and whether a retry is worth offering. */
+  const [material, setMaterialError] = useState<ReturnType<typeof materialFailureView> | null>(null);
   const [generating, setGenerating] = useState(false);
   const reduced = useReducedMotion();
 
@@ -204,13 +206,16 @@ export function LabPage({
       })
       .catch((err: unknown) => {
         if (alive) {
+          // B2a — the same catch covers both fetches, so it cannot assume the material is what failed.
+          const view = materialFailureView(err, "interactive");
+          setMaterialError(view);
           setData({
             unit: unitNumber,
             source: "none",
             interactives: [],
             warnings: [],
-            error: "could not load interactives",
-            detail: err instanceof Error ? err.message : String(err),
+            error: view.heading,
+            detail: view.detail,
           });
         }
       });
@@ -262,16 +267,24 @@ export function LabPage({
       <div className="lesson">
         {bar}
         <main className="page">
-          <h1 className="display greeting">This interactive could not be prepared</h1>
-          <p className="greeting-sub reading">{humanMessage(data.error)}</p>
-          {data.detail ? <p className="notice">{humanMessage(data.detail)}</p> : null}
+          {/* B2a — classified, so a course that cannot be read is not reported as a lab problem. */}
+          <h1 className="display greeting">
+            {material?.heading ?? "This interactive could not be prepared"}
+          </h1>
+          <p className="greeting-sub reading">{humanMessage(data.detail ?? data.error)}</p>
           {/* A SUMMARY of what arrived, never the model's text: when it has produced items that text IS
               the answer key. A `p`, not a `pre` — this is a sentence, not a code sample. */}
           {data.excerpt ? <p className="notice excerpt-summary">{data.excerpt}</p> : null}
           <div className="quiz-actions">
-            <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
-              {generating ? "Generating…" : "Try generating again"}
-            </button>
+            {/* Only when regenerating could help — a course that cannot be read is not fixed by retrying. */}
+            {material?.retryable !== false ? (
+              <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
+                {generating ? "Generating…" : "Try generating again"}
+              </button>
+            ) : null}
+            <a className="primary" href={hrefHome()}>
+              ← Back to the library
+            </a>
           </div>
         </main>
       </div>

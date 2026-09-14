@@ -180,3 +180,51 @@ export function humanMessage(raw: unknown): string {
   // sentence from the server still reaches the learner.
   return text.replace(/:\s*"[\s\S]*"$/, ".").slice(0, 200);
 }
+
+/**
+ * B2a — which KIND of failure is this, and is retrying worth offering?
+ *
+ * The quiz and lab pages load two things at once (`Promise.all([fetchCourse, fetchAssessments])`), and a
+ * bare `catch` cannot tell which failed. Both collapsed into "could not load the quiz" / "could not load
+ * interactives", so a course that could not be read was reported as a quiz problem — and the branch
+ * offered "Try generating again", a remedy for a failure that had not happened.
+ *
+ * The distinction is checkable from the message the API already produces (`api.ts` lifts `body.error` onto
+ * the thrown Error): a course that cannot be found says `unknown course: …`. That is a COURSE failure;
+ * everything else reaching this catch is about the unit's material.
+ */
+export type MaterialFailure = "course" | "material";
+
+export function classifyMaterialFailure(raw: unknown): MaterialFailure {
+  const text = (raw instanceof Error ? raw.message : String(raw ?? "")).trim();
+  // The course itself could not be read — the api layer's phrasing for a 404 on the course route.
+  if (/^unknown course:?\s*/i.test(text)) return "course";
+  // A course that is gone, renamed, or unreadable is never fixed by regenerating material.
+  if (/no such course|could not be found|renamed/i.test(text)) return "course";
+  return "material";
+}
+
+/**
+ * Who to blame, and whether to offer a retry.
+ *
+ * `retryable` is the difference between the two failure classes: a generation that produced nothing usable
+ * is worth retrying (the model is nondeterministic), while a course that cannot be read is not — the
+ * remedy is to go back to the library, not to generate again.
+ */
+export function materialFailureView(raw: unknown, subject: "quiz" | "interactive"): {
+  heading: string;
+  detail: string;
+  retryable: boolean;
+  renamed: boolean;
+} {
+  if (classifyMaterialFailure(raw) === "course") {
+    const view = courseErrorView(raw instanceof Error ? raw.message : String(raw ?? ""));
+    return { heading: view.heading, detail: view.detail, retryable: false, renamed: view.renamed };
+  }
+  return {
+    heading: subject === "quiz" ? "This quiz could not be prepared" : "This interactive could not be prepared",
+    detail: humanMessage(raw),
+    retryable: true,
+    renamed: false,
+  };
+}
