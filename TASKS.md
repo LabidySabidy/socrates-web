@@ -454,21 +454,29 @@ handshake question should start by reading it.
 
 ## P17 — Human-readable names (no identifier reaches the UI)
 
-- [ ] **T-052** `humanize()` — one pure function in `web/src/humanize.ts`: split on `-` and `_`,
+- [x] **T-052** `humanize()` — one pure function in `web/src/humanize.ts`: split on `-` and `_`,
       capitalise each word, join with spaces; idempotent on text that is already human; no acronym
       dictionary.
       **Done when:** tests cover a slug, a snake_case name, an already-human name (unchanged), an
       acronym slug (`kpi` → `Kpi`, documented as the known limitation), and empty/whitespace input.
-- [ ] **T-053** The scaffold skill authors HUMAN concept headings, and the SCHEMA template shows a human
+- [x] **T-053** The scaffold skill authors HUMAN concept headings, and the SCHEMA template shows a human
       placeholder rather than `<concept-name>`.
       **Done when:** the skill's Step 6 states the heading is the NAME and the slug is derived, with the
       reason (a slugger destroys `KPI`/`E46`); the template's example heading is human words.
-- [ ] **T-054** Apply `humanize` at every render site that prints a concept or unit name: the rail, the
+- [x] **T-054** Apply `humanize` at every render site that prints a concept or unit name: the rail, the
       unit heading, the breadcrumb, the derived module titles, the group heading, the missing-card note,
       the tray rows and their grill labels, the telemetry table cells and links, the journal and
       continue-strip "covered" lists, and the quiz/lab unit titles.
       **Done when:** a course whose SCHEMA.md holds slug names renders human text everywhere, verified
       by a test over the model-built strings and in the browser.
-- [ ] **T-055** Browser verification on a real unit: no lowercase-dashed string anywhere on the page.
+- [x] **T-055** Browser verification on a real unit: no lowercase-dashed string anywhere on the page.
       **Done when:** the rail, breadcrumb, heading, module titles, tray and telemetry table are pasted
       in the report showing human text.
+      **Done** — verified on the owner's own `string-box-alignments`, whose SCHEMA.md holds slug card
+      names: rail/table read "Suspension Angle Vocabulary · E46 Drift Target Spec · …", the breadcrumb
+      "All courses › String Box Alignments › Unit 1", the heading "Unit 1: Suspension Angle
+      Vocabulary", modules "Recite Suspension Angle Vocabulary", the tray "Grill Camber Measurement And
+      Adjustment". A full-page scan for `[a-z0-9]+(-[a-z0-9]+)+` returns only a date and a hyphenated
+      English phrase inside authored prose. The journal and continue strip were verified the same way in
+      a throwaway store (the owner's sessions record no covered concepts): "Covered Wheel Anatomy And
+      Tension Model, E46 Drift Target Spec".
