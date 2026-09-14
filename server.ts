@@ -27,6 +27,7 @@ import { buildCourse, type CourseTree, type CourseSource } from "./course-model.
 import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
+import { parseHistory } from "./history.ts";
 import {
   courseRefs,
   courseDir,
@@ -748,6 +749,46 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     }
 
     // --- journal: session history for one course -----------------------------
+    /**
+     * The settled transcript for the most recent session in a course.
+     *
+     * The client held the conversation in React state only, so a refresh dropped it while the data sat in
+     * pi's session file. This reads that file back. Settled turns only — see `history.ts` for why a
+     * half-turn is dropped rather than marked.
+     */
+    const historyMatch = /^\/api\/courses\/([^/]+)\/history$/.exec(url);
+    if (historyMatch && req.method === "GET") {
+      const ref = findCourse(discover(), decodeURIComponent(historyMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${historyMatch[1]}` });
+        return;
+      }
+      // The newest session wins: a course accumulates one per sitting, and the console shows where the
+      // learner left off. Older sessions are readable through the journal.
+      const sessions = readJournal(ref.dir).sessions.filter((s) => s.transcript);
+      const newest = sessions.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
+      if (!newest?.transcript || !existsSync(newest.transcript)) {
+        sendJson(res, 200, { turns: [], session: null, truncated: false });
+        return;
+      }
+      try {
+        // A long course produces a large JSONL; the console shows the recent conversation, so the tail is
+        // enough and the endpoint never loads a whole session to render one screen.
+        const raw = readFileSync(newest.transcript, "utf8");
+        const all = parseHistory(raw);
+        const TURNS = 40;
+        const turns = all.slice(-TURNS);
+        sendJson(res, 200, {
+          turns,
+          session: newest.file,
+          truncated: all.length > turns.length,
+        });
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
     const journalFileMatch = /^\/api\/courses\/([^/]+)\/journal\/([^/]+)$/.exec(url);
     if (journalFileMatch && req.method === "GET") {
       const result = discover();

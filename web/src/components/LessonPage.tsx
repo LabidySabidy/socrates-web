@@ -9,7 +9,7 @@
  * module pane's scroll position.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchCourse, fetchSessionStatus, type SessionStatus } from "../api.ts";
+import { fetchCourse, fetchHistory, fetchSessionStatus, type SessionStatus } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
 import { courseErrorView, shouldFollowRename } from "../course-error.ts";
@@ -124,9 +124,16 @@ export function LessonPage({
   useEffect(() => {
     let alive = true;
     setTree(null);
-    fetchCourse(courseId)
-      .then((t) => {
-        if (alive) setTree(t);
+    // 1a/1c — restore the settled transcript. Without this a refresh dropped everything the learner and
+    // the tutor had said, while the data sat untouched in pi's session file. Only SETTLED turns come
+    // back; a turn cut off mid-stream was dropped server-side rather than marked, because a half-turn
+    // rendered like a finished reply cannot be told from one.
+    setHistory([]);
+    Promise.all([fetchCourse(courseId), fetchHistory(courseId).catch(() => ({ turns: [], session: null, truncated: false }))])
+      .then(([t, h]) => {
+        if (!alive) return;
+        setTree(t);
+        setHistory(h.turns);
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));

@@ -201,3 +201,18 @@ export interface SessionStatus {
  * failure, and this app has no fallback to the ambient pi install by design.
  */
 export const fetchSessionStatus = () => get<SessionStatus>("/api/session");
+
+export interface HistoryResponse {
+  turns: { role: "user" | "assistant"; text: string }[];
+  session: string | null;
+  truncated: boolean;
+}
+
+/**
+ * The settled transcript for a course, so a refresh does not lose the conversation.
+ *
+ * Restored turns are already settled and already stripped: thinking and tool calls never left the
+ * server, and a half-turn was dropped there rather than marked. The client renders them exactly as it
+ * renders a live settled turn, which is what keeps the two paths indistinguishable.
+ */
+export const fetchHistory = (id: string) => get<HistoryResponse>(`/api/courses/${encodeURIComponent(id)}/history`);
