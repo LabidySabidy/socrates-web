@@ -503,3 +503,53 @@ declared list matched, which is the guard behaving correctly.
 **Alternatives considered:** leaving them for the developer's own use — rejected: two copies that drift is
 the failure mode this pairs with, and the app no longer reads them, so "keep for compatibility" would
 preserve a path nothing uses.
+
+## 2026-09-14 — Rendering generated content: markdown, sandboxed HTML/SVG, and mermaid via the tutor
+
+**Context:** the tutor's turn rendered as a raw text node (`LessonPage.tsx:551-553`), so `**bold**` showed its
+asterisks, fenced code showed backticks, and a generated diagram had nowhere to go. Measured across the real
+session transcripts: 28 assistant replies use `**emphasis**` and 2 use fenced code blocks. The tutor can
+write; the app could only print.
+
+The security question had to be answered BEFORE a renderer existed, because generated content is
+attacker-influenced by construction — it comes from a model, and a model can be steered by anything in its
+context, including a course file the learner did not write.
+
+**Decision, in three tiers.**
+
+1. **Markdown is rendered by our own parser, not a library.** Bold, italics, inline code, fenced code,
+   links, lists, tables. No HTML passthrough: a tag in the text is escaped and shown, never interpreted. This
+   tier has NO security surface, which is why it is separate from the others — it is the only one that is
+   safe by construction rather than by containment.
+
+2. **Generated HTML and SVG render in a sandboxed `<iframe srcdoc>`, never inline.** The iframe carries
+   `sandbox="allow-scripts"` and deliberately NOT `allow-same-origin`. That combination is the whole
+   isolation: without `allow-same-origin` the frame gets a NULL origin, so its scripts cannot read the app's
+   cookies, localStorage, `window.parent` internals, or issue credentialed same-origin fetches to
+   `/api/...`. Adding `allow-same-origin` alongside `allow-scripts` is the classic mistake — it hands the
+   generated content the app's own origin and removes every guarantee the sandbox provides. The frame is also
+   `referrerpolicy="no-referrer"` and given no `allow` permissions.
+   **What this does NOT protect against, stated rather than implied:** the frame can still make network
+   requests, so a generated page could exfiltrate what the learner pastes INTO it; it can consume CPU; and
+   `allow-scripts` means it can navigate itself. This app's content is generated for the learner, not
+   published to them, so those are acceptable — but they are why the frame is not given a route to the app's
+   data, and why inline rendering was refused outright.
+
+3. **Mermaid is rendered by the TUTOR, not by a browser library.** `mermaid@12` is 124 MB unpacked and needs
+   a live DOM, which breaks the project's two-runtime-dependency rule and would ship a rendering engine to
+   every learner. Instead the tutor emits SVG directly in a fenced ```mermaid block's place — the app tells
+   it, in the prompt, to produce SVG when a diagram helps. That SVG then goes through tier 2's sandbox.
+   This means no mermaid parser, no bundle growth, and one less thing to keep in step with upstream.
+
+**Alternatives considered:** `mermaid` in the client (rejected on size and dependencies); `@mermaid-js/mermaid-cli`
+(rejected: 52 KB itself but it pulls a headless Chromium, and rendering diagrams by launching a browser from
+a local app is a far bigger commitment than the feature justifies); sanitising HTML with a library and
+rendering inline (rejected: no sanitiser is present, the project ships two dependencies, and a hand-written
+sanitiser is exactly the kind of thing that looks safe and is not — the sandbox gives a guarantee a filter
+cannot); `dangerouslySetInnerHTML` with a CSP (rejected: a CSP strong enough to contain arbitrary generated
+HTML also breaks the app's own assets, and it is a whole-app policy to solve one component's problem).
+
+**Tradeoffs:** the frame is a frame — it does not inherit the app's fonts or CSS, so generated HTML will look
+like its own page rather than part of the console. That is honest: it IS its own document, and pretending
+otherwise is what makes inline rendering tempting and unsafe. Generated content that must look native should
+be SVG, which inherits nothing either but scales cleanly.

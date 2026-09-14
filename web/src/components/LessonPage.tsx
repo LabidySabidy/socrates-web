@@ -24,6 +24,7 @@ import { courseErrorView, humanMessage, shouldFollowRename } from "../course-err
 import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
 import { publishTranscript } from "./ReportBugPanel.tsx";
+import { Markdown } from "./Markdown.tsx";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { humanize } from "../humanize.ts";
@@ -549,13 +550,17 @@ export function LessonPage({
               )
             ) : (
               <div className="prose reading" key={i}>
-                {m.text}
+                {/* The tutor's prose is rendered, not printed: emphasis and code were showing their own
+                    markers, and generated diagrams had nowhere to go. */}
+                <Markdown text={m.text} />
               </div>
             ),
           )}
 
           {prose ? (
-            <div className="prose reading">{prose}</div>
+            <div className="prose reading">
+              <Markdown text={prose} />
+            </div>
           ) : busy ? (
             <p className="presence">Socrates is thinking…</p>
           ) : history.length === 0 ? (
