@@ -824,8 +824,11 @@ a.mod:hover { text-decoration: none; }
 }
 
 /* ---------------------------------------------------------------------------
-   Bug reports — a testing tool docked at the bottom, not a modal. The page stays visible above it, which
-   is the point: a modal covering the thing you are describing makes it impossible to describe.
+   Bug reports — a RIGHT-HAND panel, not a bottom sheet and not a modal.
+
+   The owner asked for this after using the bottom sheet: it took the full width for two fields and pushed
+   the page up, whereas a side panel leaves the page readable beside it. The page is still not covered, which
+   was the original requirement — a modal over the thing you are describing makes it impossible to describe.
    --------------------------------------------------------------------------- */
 .report-trigger,
 .report-link {
@@ -843,29 +846,34 @@ a.mod:hover { text-decoration: none; }
 .report-link:hover { border-color: var(--action); color: var(--action); }
 
 .report-sheet {
+  /* A SMALL POPUP, anchored under the control that opens it.
+     The right-hand panel took 420px of width for a form that needs about 320, so the page lost a third of
+     its width for no reason. This is a popover: positioned against the top bar, right-aligned under the
+     Report a bug button, and sized to its content. The page stays readable and the panel stops dominating. */
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 56px;
+  right: 16px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 76px);
   z-index: 60;
-  max-height: 62vh;
   overflow-y: auto;
   background: var(--surface);
+  border: 1px solid var(--rule);
   border-top: 2px solid var(--action);
-  box-shadow: 0 -8px 28px rgba(32, 31, 29, 0.18);
-  padding: 14px 20px 18px;
-  display: grid;
-  grid-template-columns: minmax(260px, 380px) 1fr;
-  gap: 12px 22px;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(32, 31, 29, 0.22);
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.report-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.report-head { display: flex; align-items: center; gap: 10px; }
 .report-head .spacer { flex: 1; }
-.report-capture { grid-row: 2 / span 4; }
-.report-thumb { max-width: 100%; border: 1px solid var(--rule); border-radius: 4px; display: block; }
+.report-thumb { max-width: 100%; max-height: 150px; object-fit: contain; border: 1px solid var(--rule); border-radius: 4px; display: block; }
 .report-thumb-button { padding: 0; border: 0; background: none; cursor: zoom-in; }
 .report-full { max-width: 100%; border: 1px solid var(--rule); border-radius: 4px; margin-top: 10px; }
 .report-capture-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-.report-note { color: var(--ink-label); font-size: 12.5px; line-height: 1.5; margin: 6px 0; }
+.report-note { color: var(--ink-label); font-size: 12.5px; line-height: 1.5; margin: 4px 0; }
 .report-field { display: block; }
 .report-field textarea {
   width: 100%;
@@ -879,9 +887,10 @@ a.mod:hover { text-decoration: none; }
   resize: vertical;
 }
 .report-attach { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.report-confirm { grid-column: 1 / -1; background: rgba(180, 83, 9, 0.08); padding: 8px 10px; border-radius: 4px; }
-.report-actions { grid-column: 2; display: flex; justify-content: flex-end; gap: 8px; }
+.report-confirm { background: rgba(180, 83, 9, 0.08); padding: 8px 10px; border-radius: 4px; }
+.report-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
 .report-saved { margin: 0 0 10px; }
+.report-choose { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .report-list { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 16px; }
 .report-item { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; background: var(--surface); }

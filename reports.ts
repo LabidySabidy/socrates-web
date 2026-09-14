@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { storeRoot } from "./course-store.ts";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 /** One turn of the conversation the reporter chose to attach. */
 export interface ReportTurn {
@@ -54,16 +54,32 @@ export type ReportSummary = Omit<Report, "transcript">;
  */
 export function reportsRoot(env: NodeJS.ProcessEnv = process.env): string {
   if (env.SOCRATES_REPORTS) return resolve(env.SOCRATES_REPORTS);
-  // Derived from `storeRoot()`, so ONE env var redirects both — but the shape differs between the two cases
-  // and getting it wrong is not cosmetic. `storeRoot()` returns `<SOCRATES_HOME>` verbatim when set (it IS
-  // the courses directory) and `~/.socrates/courses` otherwise. Taking `dirname()` of it unconditionally made
-  // every temp store resolve to the SAME `os.tmpdir()/reports`, so tests shared one directory and 11 reports
-  // accumulated; and building it from `homedir()` independently (the first attempt) meant tests wrote into
-  // the owner's REAL store, which happened and the files were deleted.
-  //
-  // So: when overridden, reports sit INSIDE the redirected store; otherwise beside the default courses dir.
-  if (env.SOCRATES_HOME) return join(storeRoot(env), "reports");
-  return join(dirname(storeRoot(env)), "reports");
+  /**
+   * A SIBLING of the courses directory — decided by its SHAPE, not by whether an env var is set.
+   *
+   * Two attempts got this wrong, both in ways worth recording:
+   *
+   *  1. Built from `homedir()` independently, so `SOCRATES_HOME` did not redirect it and a test run wrote
+   *     into the owner's real store.
+   *  2. Branched on `env.SOCRATES_HOME`, which `server.ts` ALWAYS sets (`storeEnv` is
+   *     `{...process.env, SOCRATES_HOME: store}` at `server.ts:188`). So the override branch fired for every
+   *     request, and reports went to `<store>-reports` while the owner's real files sat in
+   *     `~/.socrates/reports` — the app listed nothing, and it looked like the files had vanished.
+   *
+   * The rule that cannot go wrong: if the courses directory is literally named `courses`, reports sit beside
+   * it (`~/.socrates/reports`); otherwise the courses path IS a redirect target, so reports hang off it as
+   * `<courses>-reports`. No env inspection, so no way for a caller to defeat it by setting the variable.
+   */
+  const courses = resolve(storeRoot(env));
+  if (basename(courses) === "courses") return join(dirname(courses), "reports");
+  return `${courses}-reports`;
+}
+
+/** Guard used by tests and by the server: the reports root must never be scanned as a course. */
+export function reportsAreOutsideStore(env: NodeJS.ProcessEnv = process.env): boolean {
+  const reports = reportsRoot(env);
+  const courses = storeRoot(env);
+  return reports !== courses && !reports.startsWith(courses + sep);
 }
 
 /**

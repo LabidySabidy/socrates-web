@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { storeRoot } from "./course-store.ts";
 import {
   MAX_IMAGE_BYTES,
@@ -22,6 +22,7 @@ import {
   readFullReport,
   redactPaths,
   reportStem,
+  reportsAreOutsideStore,
   reportsRoot,
   saveReport,
   shortId,
@@ -45,16 +46,30 @@ test("the reports store is derived from the courses store, so SOCRATES_HOME over
   assert.ok(reportsRoot(e).includes("soc-reports-"), "the override is honoured");
   assert.ok(!reportsRoot(e).includes(join(".socrates", "reports")), "and it is not the real store");
 
-  // NOT inside a course. `storeRoot()` returns the courses DIRECTORY, so an override means reports sit
-  // beside it inside the redirected store; the default puts them beside `~/.socrates/courses`.
-  const courses = storeRoot(e);
-  assert.notEqual(reportsRoot(e), courses, "the reports root must not BE the courses dir");
-  assert.ok(reportsRoot(e).startsWith(courses), "with an override it lives inside the redirected store");
-  assert.ok(!reportsRoot(e).includes(join(courses, "courses")), "and is not nested oddly");
+  // NEVER a child of the courses directory: the store scan does readdirSync over it, and the owner's reports
+  // really did land in `~/.socrates/courses/reports` once. `reportsAreOutsideStore` is the guard.
+  assert.equal(reportsAreOutsideStore(e), true, "with an override");
+  assert.equal(reportsAreOutsideStore({}), true, "and by default");
+  assert.notEqual(reportsRoot(e), storeRoot(e), "it must not BE the courses dir");
 
-  // The default lands beside the default courses store, under the same root.
+  // The default is a sibling of the default courses store.
   assert.equal(dirname(reportsRoot({})), dirname(storeRoot({})), "same parent as the default courses store");
-  assert.equal(reportsRoot({}).endsWith("reports"), true);
+  assert.ok(reportsRoot({}).endsWith(sep + "reports"));
+
+  // An override keeps the reports beside the redirected store, so a temp store is self-contained.
+  assert.ok(reportsRoot(e).startsWith(join(tmpdir(), "soc-reports-")), "inside the temp root");
+
+  // THE CASE THAT BROKE, and the reason the rule keys off the directory SHAPE rather than the env var:
+  // `server.ts:188` builds `storeEnv` as `{...process.env, SOCRATES_HOME: store}` — so for every server
+  // request `SOCRATES_HOME` IS set, even when nothing overrode it. Branching on that put the owner's reports
+  // in `<store>-reports` while the real files sat in `~/.socrates/reports`, and the app listed nothing.
+  const serverStoreEnv = { ...process.env, SOCRATES_HOME: storeRoot() };
+  assert.equal(
+    reportsRoot(serverStoreEnv),
+    reportsRoot({}),
+    "the server's own storeEnv must resolve to the SAME reports root as no override at all",
+  );
+  assert.ok(!reportsRoot(serverStoreEnv).includes("courses-reports"), "and never to <store>-reports");
 });
 
 test("writing a report never touches the real store when SOCRATES_HOME is set", (t) => {

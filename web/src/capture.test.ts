@@ -90,3 +90,59 @@ test("the frame is taken after a PAINT, not merely after play() resolves", () =>
   // and the portable fallback exists for browsers without the callback
   assert.match(source, /requestAnimationFrame/, "with a fallback for browsers lacking the callback");
 });
+
+test("the capture excludes the report panel itself", () => {
+  // The first real capture photographed the app's own bug-report form, because the panel is open when the
+  // capture runs. "Capture this page" must mean the page, not the instrument.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  assert.match(source, /closest\("\.report-sheet"\)/, "anything inside the panel is skipped");
+});
+
+test("the capture excludes elements that are off-screen", () => {
+  // The skip link sits at `left: -9999px`, so its text was painted at x = -9999 — invisible on this canvas
+  // but stray text at the origin on a wider one. Off-canvas is not what the reporter is looking at.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  assert.match(source, /rect\.right <= 0 \|\| rect\.bottom <= 0/, "off-screen elements are skipped");
+  assert.match(source, /rect\.width <= 0 \|\| rect\.height <= 0/, "and zero-size ones");
+});
+
+test("the panel is a small anchored popup, not a full-height side panel", () => {
+  const css = readFileSync(join(import.meta.dirname, "theme.css"), "utf8");
+  const rule = css.slice(css.indexOf(".report-sheet {"), css.indexOf(".report-head {"));
+  assert.match(rule, /position:\s*fixed/);
+  assert.match(rule, /top:\s*\d+px/, "anchored below the control, not to the viewport top");
+  assert.match(rule, /width:\s*min\(\d+px/, "a bounded width, so it does not take a third of the screen");
+  assert.ok(!/bottom:\s*0/.test(rule), "it must NOT stretch to the bottom any more");
+  assert.ok(!/height:\s*100vh/.test(rule), "nor take the full height");
+});
+
+test("images and SVG icons are DRAWN, not skipped", () => {
+  // The first version painted only backgrounds and text, so every <img> and every SVG was silently absent —
+  // including the report screenshots on the review page. Silent is the worst property for that: a page with
+  // no logo looks like a page that has no logo, not like a bug in the capture. The owner noticed the missing
+  // images, which is the only reason it was caught.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  assert.match(source, /el\.tagName === "IMG"/, "img elements are handled");
+  assert.match(source, /drawImage\(img,/, "and actually drawn");
+  assert.match(source, /SVGSVGElement|el\.tagName === "svg"/, "inline SVG is handled");
+  assert.match(source, /XMLSerializer|serializeToString/, "by serialising it to a data URL");
+  // and the awaiting variant exists so icons are decoded before the PNG is read
+  assert.match(source, /captureDomAsync/, "there is an async variant that waits for icons");
+});
+
+test("one undrawable image cannot lose the whole capture", () => {
+  // A cross-origin image with no CORS headers TAINTS the canvas, and a tainted canvas throws on toDataURL —
+  // which would produce NO screenshot at all. Each image draw is therefore guarded, so the rest survives.
+  const source = readFileSync(join(import.meta.dirname, "capture.ts"), "utf8");
+  const imgBlock = source.slice(source.indexOf('el.tagName === "IMG"'), source.indexOf('el.tagName === "svg"'));
+  assert.match(imgBlock, /try\s*\{/, "the draw is guarded");
+  assert.match(imgBlock, /catch\s*\{/, "with a catch that keeps going");
+});
+
+test("the standing capture explainer is gone, but a failure note still appears", () => {
+  // The owner asked for the paragraph to go: it explained a tradeoff they had already internalised, and it
+  // sat in the panel permanently. What must REMAIN is the note when a capture actually fails.
+  const panel = readFileSync(join(import.meta.dirname, "components", "ReportBugPanel.tsx"), "utf8");
+  assert.ok(!panel.includes("only needed for things outside the page"), "the standing explainer is removed");
+  assert.match(panel, /setCaptureNote\(/, "a failure still says something");
+});

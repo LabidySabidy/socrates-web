@@ -77,3 +77,10 @@ test("the transcript is offered only when there is one, and sent only when asked
   assert.match(panel, /transcript\.length > 0 \?/, "the checkbox appears only with a conversation");
   assert.match(panel, /attachTranscript && transcript\.length > 0 \? transcript : null/, "and is opt-in");
 });
+
+test("the standing capture explainer is gone, but a failure note still appears", () => {
+  // The owner asked for the paragraph to go: it explained a tradeoff they had already internalised, and it
+  // sat in the panel permanently. What must REMAIN is the note when a capture actually fails.
+  assert.ok(!panel.includes("only needed for things outside the page"), "the standing explainer is removed");
+  assert.match(panel, /setCaptureNote\(/, "a failure still says something");
+});

@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { postReport } from "../api.ts";
-import { captureSupported, frameWithinCap, dataUrlBytes, MAX_IMAGE_BYTES, type Frame } from "../capture.ts";
+import { frameWithinCap, MAX_IMAGE_BYTES, type Frame } from "../capture.ts";
 
 /** The app's own build identity, so a report can be tied to the bundle it came from. */
 function appVersion(): string | null {
@@ -54,35 +54,22 @@ export function ReportBugPanel({
 
   const hasDraft = whatIsWrong.trim().length > 0;
 
-  // Capture once, when the panel opens. The dialog appears on every capture; that is expected and the copy
-  // below says so, because an unexplained permission prompt reads as something being wrong.
+  // Capture the PAGE on open. No prompt, no permission, instant — so it just happens rather than waiting to
+  // be asked. The screen capture is now an explicit button, because that is the one that costs a dialog.
+  //
+  // The owner's report was the reason: two reports filed, and the share dialog appeared for a defect that
+  // was entirely inside this app.
   useEffect(() => {
     firstField.current?.focus();
-    let alive = true;
-    if (!captureSupported()) {
-      setCaptureNote("Screen capture is not available here, so this report will be text only.");
-      return;
-    }
-    void import("../capture.ts").then(async ({ captureFrame }) => {
-      const result = await captureFrame();
-      if (!alive) return;
-      if (!result.ok) {
-        // THE ORDINARY CASE for anyone who dismisses the dialog. The report stays submittable.
-        setCaptureNote(`No screenshot attached — ${result.reason}. You can still save the report.`);
-        return;
+    void import("../capture.ts").then(async ({ captureDomAsync }) => {
+      const shot = await captureDomAsync();
+      if (shot.dataUrl && shot.elements > 0) {
+        setFrame({ dataUrl: shot.dataUrl, width: shot.width, height: shot.height });
+        setCaptureNote(null);
+      } else {
+        setCaptureNote("The page could not be captured — use Capture screen if you need an image.");
       }
-      if (!frameWithinCap(result.frame)) {
-        setCaptureNote(
-          `No screenshot attached — it was ${(dataUrlBytes(result.frame.dataUrl) / 1024 / 1024).toFixed(1)} MB, over the ${MAX_IMAGE_BYTES / 1024 / 1024} MB limit. The report can still be saved.`,
-        );
-        return;
-      }
-      setFrame(result.frame);
-      setCaptureNote(null);
     });
-    return () => {
-      alive = false;
-    };
   }, []);
 
   // Escape closes, asking first when there is something to lose.
@@ -98,6 +85,26 @@ export function ReportBugPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [hasDraft, confirmDiscard, onClose]);
+
+  /**
+   * Capture the app's own interface. No permission prompt, no picker, instant — and it covers almost every
+   * defect filed against a UI. The screen capture stays for what the DOM cannot show.
+   */
+  function captureApp() {
+    void import("../capture.ts").then(async ({ captureDomAsync }) => {
+      const shot = await captureDomAsync();
+      if (!shot.dataUrl || shot.elements === 0) {
+        setCaptureNote("The page could not be captured. Try a screen capture instead.");
+        return;
+      }
+      if (!frameWithinCap(shot)) {
+        setCaptureNote(`No screenshot attached — over the ${MAX_IMAGE_BYTES / 1024 / 1024} MB limit.`);
+        return;
+      }
+      setFrame({ dataUrl: shot.dataUrl, width: shot.width, height: shot.height });
+      setCaptureNote(null);
+    });
+  }
 
   async function retake() {
     setCaptureNote("Capturing…");
@@ -177,17 +184,18 @@ export function ReportBugPanel({
         ) : (
           <div className="report-capture-actions">
             <span className="report-note">{captureNote ?? "Capturing…"}</span>
-            <button type="button" onClick={() => void retake()}>
-              Capture now
-            </button>
+            <div className="report-choose">
+              <button type="button" className="primary" onClick={captureApp}>
+                Capture this page
+              </button>
+              <button type="button" onClick={() => void retake()}>
+                Capture screen
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      <p className="report-note">
-        Your browser asks permission to share the screen on every capture. That prompt is expected — the
-        frame is taken once and the sharing stops immediately.
-      </p>
 
       <label className="report-field">
         <span className="eyebrow">What&rsquo;s wrong, and what you expected</span>
