@@ -213,3 +213,89 @@ grill. The tutor interviews; the answers become `MISSION.md`.
 - [ ] DriftScout's learning directory migrated and rendering.
 
 **Not in scope:** re-adding any path-based course concept in another form.
+
+---
+
+# P17 — Human-readable names: no identifier reaches the UI
+
+## Goal
+A learner never reads a slug. Every concept and unit name on every screen is human text, while the slug
+stays the identity key everywhere an identity is required.
+
+## Approach
+Two layers, one function. A single pure `humanize()` lives in a shared module importable by the server
+and the client (the precedent is `web/src/expr.ts`, imported by `course-model.ts`), and is applied at the
+point where text becomes pixels — never earlier. Applying it earlier would silently change lookups,
+module ids, grill prompts and telemetry keys, which is the bug this feature must not cause.
+
+The source layer changes with it: the scaffold skill authors HUMAN card headings
+(`### ⬜ Wheel anatomy and tension model`) and the app derives the slug, exactly the split the course
+title now uses (H1 is the name, slug is derived). The id stays the slug and remains the telemetry key
+and the MIS reference, so nothing downstream changes. This matters beyond aesthetics: a slugger destroys
+casing, so `KPI`, `SAI`, `ERD` and `E46` are unrecoverable once slugged; names authored as words keep them.
+
+Known limitation, accepted: a legacy slug id cannot recover casing the slugger already destroyed —
+`kpi` humanises to `Kpi`. Legacy courses read correctly apart from acronym casing. No acronym
+dictionary: it is a maintenance trap and it would be guessing.
+
+## Phases
+
+1. **humanize** — one pure function, tested: splits on `-` and `_`, capitalises each word, joins with
+   spaces, idempotent on text that is already human.
+2. **Source layer** — the scaffold skill authors human concept headings; the template shows a human
+   heading rather than `<concept-name>`.
+3. **Display layer** — `humanize` applied at every render site that prints a concept or unit name, plus
+   the derived module titles built in `course-model.ts`.
+4. **Browser verification** — open a unit and confirm no lowercase-dashed string appears anywhere.
+
+## Files that will change
+
+| File | Change | Phase |
+|---|---|---|
+| `web/src/humanize.ts` | new: the one pure function | 1 |
+| `web/src/ui.test.ts` | tests for humanize + the render helpers | 1, 3 |
+| `~/.pi/agent/skills/skill-scaffold-learning.md` | author human card names; say why | 2 |
+| `~/.pi/agent/templates/learning/SCHEMA.md.template` | human heading placeholder | 2 |
+| `course-model.ts` | derived module titles and the unit's group title are humanised at build | 3 |
+| `web/src/components/CoursePage.tsx` | rail, unit heading, module titles, missing-card note | 3 |
+| `web/src/components/LessonPage.tsx` | breadcrumb concept segment, lesson heading | 3 |
+| `web/src/components/QuizPage.tsx` | unit title in the eyebrow, breadcrumb, and the quoted unit | 3 |
+| `web/src/components/LabPage.tsx` | same three sites | 3 |
+| `web/src/components/TelemetryRail.tsx` | CONCEPT cells and their grill links | 3 |
+| `web/src/components/MisconceptionTray.tsx` | tray row concept and the `Grill <concept>` label | 3 |
+| `web/src/components/JournalPanel.tsx` | the journal's "covered" list | 3 |
+| `web/src/components/ContinueStrip.tsx` | the continue strip's "covered" list | 3 |
+
+## Acceptance criteria
+
+- [ ] `humanize` splits on `-` and `_`, capitalises each word, and is idempotent on human text
+- [ ] no acronym dictionary exists anywhere in the change
+- [ ] every render site that can print a concept or unit name is enumerated in the report and humanised
+- [ ] the model's identity fields (`name`, `concept`, `id`, `title`) still hold the raw key, so lookups,
+      module ids, grill prompts and telemetry keys are unchanged
+- [ ] a course whose SCHEMA.md still holds slug names displays human text, with no migration
+- [ ] a fresh scaffold writes human card names
+- [ ] a unit page in the browser shows no lowercase-dashed string in the rail, breadcrumb, heading,
+      module titles, tray or telemetry table
+
+## Not in scope
+
+- An acronym dictionary or any casing-recovery heuristic (explicitly rejected: a maintenance trap).
+- Migrating existing SCHEMA.md files to human headings. Legacy courses are display-only affected.
+- Changing the identity layer: concept ids stay slugs, and MIS references keep matching on them.
+- The course title (done in P16) and anything from T-042 or T-034.
+
+## Open questions
+
+- None blocking. The one decision taken without asking: `humanize` is applied at render, not at the
+  model boundary, because the model's `title`/`name` fields double as keys in three places
+  (`CoursePage`'s unit lookup, `derivedModules`' ids, and the grill prompt).
+
+## References
+
+- `DECISIONS.md` — P16, the same name/slug split for the course title.
+- `docs/CONTENT-MODEL.md` — "The name lives in one place".
+
+## Current step
+
+Plan written; implementing phase 1.

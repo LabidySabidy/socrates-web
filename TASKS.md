@@ -451,3 +451,24 @@ rendered.
 **Kept:** the handshake logging. It is five lines per chat turn, carries no message content and no
 paths, and it is what turned a confident two-session diagnosis into a disproved one. A future
 handshake question should start by reading it.
+
+## P17 — Human-readable names (no identifier reaches the UI)
+
+- [ ] **T-052** `humanize()` — one pure function in `web/src/humanize.ts`: split on `-` and `_`,
+      capitalise each word, join with spaces; idempotent on text that is already human; no acronym
+      dictionary.
+      **Done when:** tests cover a slug, a snake_case name, an already-human name (unchanged), an
+      acronym slug (`kpi` → `Kpi`, documented as the known limitation), and empty/whitespace input.
+- [ ] **T-053** The scaffold skill authors HUMAN concept headings, and the SCHEMA template shows a human
+      placeholder rather than `<concept-name>`.
+      **Done when:** the skill's Step 6 states the heading is the NAME and the slug is derived, with the
+      reason (a slugger destroys `KPI`/`E46`); the template's example heading is human words.
+- [ ] **T-054** Apply `humanize` at every render site that prints a concept or unit name: the rail, the
+      unit heading, the breadcrumb, the derived module titles, the group heading, the missing-card note,
+      the tray rows and their grill labels, the telemetry table cells and links, the journal and
+      continue-strip "covered" lists, and the quiz/lab unit titles.
+      **Done when:** a course whose SCHEMA.md holds slug names renders human text everywhere, verified
+      by a test over the model-built strings and in the browser.
+- [ ] **T-055** Browser verification on a real unit: no lowercase-dashed string anywhere on the page.
+      **Done when:** the rail, breadcrumb, heading, module titles, tray and telemetry table are pasted
+      in the report showing human text.
