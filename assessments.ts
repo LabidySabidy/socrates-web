@@ -298,3 +298,24 @@ export function writeCache(
 }
 
 export { dirname };
+
+/**
+ * What to say about a reply that could not be turned into items — WITHOUT quoting it.
+ *
+ * `excerpt` used to be the model's first 400 characters, added in 58c7229 as user-facing copy ("422 with
+ * the reason and an excerpt"). The reason is already in `detail`. What the excerpt added was the model's
+ * own text — and when the model has produced items, that text IS the answer key: `"answer": "Camber"`,
+ * the accepted alternatives, the hints and the steps. A failure path was handing the learner the answers.
+ *
+ * So the affordance is kept and the payload is not: the learner is told what ARRIVED rather than shown it.
+ * Three shapes cover every failure this branch serves.
+ */
+export function describeReply(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "the tutor replied with nothing at all";
+  const hasJson = /```(?:json)?/i.test(trimmed) || /<assessments>/i.test(trimmed);
+  if (hasJson) {
+    return "the tutor's reply contained a JSON block that could not be read as items";
+  }
+  return `the tutor replied in prose instead of the requested format (${trimmed.length} characters)`;
+}

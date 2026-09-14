@@ -46,6 +46,7 @@ import {
   awardedBadge,
   badgeState,
   buildGenerationPrompt,
+  describeReply,
   extractItems,
   raisesBadge,
   readCache,
@@ -973,7 +974,8 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             sendJson(res, 422, {
               error: "generation did not produce usable items",
               detail: extracted.error,
-              excerpt: turn.text.slice(0, 400),
+              // NOT the model's text: when it has produced items, that text is the answer key.
+              excerpt: describeReply(turn.text),
             });
             return;
           }
@@ -1085,7 +1087,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             sendJson(res, 422, {
               error: "generation did not produce a usable interactive",
               detail: extracted.error,
-              excerpt: turn.text.slice(0, 400),
+              excerpt: describeReply(turn.text),
             });
             return;
           }

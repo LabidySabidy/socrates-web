@@ -48,5 +48,6 @@ export interface InteractivesResponse {
   warnings: string[];
   error?: string;
   detail?: string;
+  /** A REDACTED description of what the model returned — never its text. */
   excerpt?: string;
 }

@@ -635,6 +635,71 @@ test("a generated interactive that fails validation is refused, not half-served"
   assert.equal(body.interactives, undefined, "no partial result");
 });
 
+test("a failed generation does not return the tutor's own text, which contains the answer key", async (t) => {
+  // D2, approved. `excerpt: turn.text.slice(0, 400)` was added in 58c7229 as user-facing copy ("422 with
+  // the reason and an excerpt"), but the tutor's text is the raw generation JSON — `"answer"`, `"accepts"`,
+  // `"hints"`, `"steps"` — so a failure path handed the learner the answer key. The assertion is at the
+  // RESPONSE boundary, not in a component, because a component-level test passes while the field remains
+  // in the payload.
+  const { base } = await bootChat(t); // the mock replies with prose, so extraction fails
+  const res = await fetch(`${base}/api/courses/course-basic/assessments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1 }),
+  });
+  assert.equal(res.status, 422);
+  const raw = await res.text();
+
+  // The three ways the answer key could reach the client.
+  assert.doesNotMatch(raw, /"answer"\s*:/, "no answer field");
+  assert.doesNotMatch(raw, /"accepts"\s*:|"hints"\s*:|"steps"\s*:/, "no graded fields");
+  // NOTE: `detail` legitimately contains backticks — it is extractItems' own message naming the expected
+  // format. The assertion is therefore on the EXCERPT, which is the field that used to carry the model's
+  // text, not on the whole payload.
+  const body = JSON.parse(raw) as { error: string; detail: string; excerpt?: string };
+  assert.doesNotMatch(body.excerpt ?? "", /as requested by the mock/, "none of the model's prose");
+  assert.doesNotMatch(body.excerpt ?? "", /```/, "and none of its raw text");
+  // The REASON is still reported — that was the point of the whole branch.
+  assert.match(body.error, /did not produce usable items/);
+  assert.match(body.detail, /no JSON block/);
+  // And the affordance survives, redacted rather than removed.
+  if (body.excerpt !== undefined) {
+    assert.ok(body.excerpt.length <= 120, `excerpt must be a summary, got ${body.excerpt.length} chars`);
+    assert.match(body.excerpt, /prose|no JSON|instead/i, "it should say what arrived, not quote it");
+  }
+});
+
+test("the response leaks no answer key even when the model returns a real one", async (t) => {
+  // The prose mock proves a fenced block is stripped; this proves the ANSWER KEY itself is not shipped.
+  // The mock returns valid-looking items with an unparseable tail, so extraction fails AFTER the model has
+  // stated the answer — which is the worst case for the old `excerpt`.
+  const { base } = await bootChatWith(t, "mock-pi-answerkey.mjs");
+  const res = await fetch(`${base}/api/courses/course-basic/assessments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1 }),
+  });
+  assert.equal(res.status, 422);
+  const raw = await res.text();
+  assert.doesNotMatch(raw, /Camber/, "the model's stated answer must not reach the client");
+  assert.doesNotMatch(raw, /"accepts"\s*:/, "nor the accepted-answer list");
+  assert.doesNotMatch(raw, /"hints"\s*:|"steps"\s*:/, "nor the hints or steps");
+});
+
+test("a failed interactive generation likewise returns no answer key", async (t) => {
+  const { base } = await bootChat(t);
+  const res = await fetch(`${base}/api/courses/course-basic/interactives`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit: 1 }),
+  });
+  assert.equal(res.status, 422);
+  const raw = await res.text();
+  const body = JSON.parse(raw) as { excerpt?: string };
+  assert.doesNotMatch(body.excerpt ?? "", /```/, "no fenced JSON from the model");
+  assert.doesNotMatch(body.excerpt ?? "", /as requested by the mock/, "no model prose either");
+});
+
 test("budapest ships as a mode: the server injects it, the message stays clean", async (t) => {
   // The original concatenated the modifier onto the message (app.js:184), polluting the prompt, the
   // transcript and the event log. The mode travels separately now.

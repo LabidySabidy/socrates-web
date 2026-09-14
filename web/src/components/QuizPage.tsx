@@ -198,7 +198,9 @@ export function QuizPage({
           <h1 className="display greeting">This quiz could not be prepared</h1>
           <p className="greeting-sub reading">{data.error}</p>
           {data.detail ? <p className="notice">{data.detail}</p> : null}
-          {data.excerpt ? <pre className="excerpt">{data.excerpt}</pre> : null}
+          {/* A SUMMARY of what arrived, never the model's text: when it has produced items that text IS
+              the answer key. A `p`, not a `pre` — this is a sentence, not a code sample. */}
+          {data.excerpt ? <p className="notice excerpt-summary">{data.excerpt}</p> : null}
           <div className="quiz-actions">
             <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
               {generating ? "Generating…" : "Try generating again"}

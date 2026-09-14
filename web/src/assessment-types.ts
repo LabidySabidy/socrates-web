@@ -34,6 +34,7 @@ export interface AssessmentsResponse {
   /** Present on a failure response, so the UI can show an error rather than half a quiz. */
   error?: string;
   detail?: string;
+  /** A REDACTED description of what the model returned — never its text. See describeReply. */
   excerpt?: string;
 }
 
