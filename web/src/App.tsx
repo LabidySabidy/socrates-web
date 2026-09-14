@@ -35,6 +35,28 @@ export function App() {
 
   return (
     <>
+      {/* F2 — first in the DOM so it is the first thing Tab reaches, and out of flow until focused. The
+          chrome (brand, Budapest toggle, breadcrumb, Exit) is 4 Tab stops before any content, on every
+          route; a keyboard user needs a way past it. Targets #main-content, which each route now carries —
+          the lesson wraps its content in `div.lesson`, not `<main>`, so a landmark-only target would have
+          moved focus nowhere on the page a learner actually sits on. */}
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(e) => {
+          // `href="#main-content"` alone SCROLLS but does not reliably move focus: measured in the browser,
+          // activation left `document.activeElement` on <body>, so the next Tab returned to the chrome the
+          // learner had just skipped — a skip link that skips nothing. The focus move is explicit.
+          const target = document.getElementById("main-content");
+          if (!target) return;
+          e.preventDefault();
+          target.focus();
+          target.scrollIntoView({ block: "start" });
+          window.history.replaceState(null, "", "#main-content");
+        }}
+      >
+        Skip to content
+      </a>
       <TopBar courseCount={data ? visible.length : null} budapest={budapest} onBudapestChange={setBudapest} />
       {route.name === "lab" ? (
         <LabPage

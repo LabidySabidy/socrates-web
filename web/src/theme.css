@@ -795,3 +795,28 @@ a.mod:hover { text-decoration: none; }
 }
 .msg-dispatch .eyebrow { display: block; margin-bottom: 2px; }
 .msg-dispatch .dispatch-note { font-size: 13px; font-style: italic; }
+
+/* F2 — skip link. Off-screen but present in the tab order, revealed on focus. `:focus-visible` is not used
+   here because a keyboard user who has just Tabbed needs to SEE it, and focusing it programmatically (a
+   click on the link) should also reveal it. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 10px 16px;
+  background: var(--surface, #fff);
+  color: var(--ink, #201f1d);
+  border: 1px solid var(--action, #1865f2);
+  border-radius: 0 0 6px 0;
+  text-decoration: none;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+/* The skip target. `tabindex="-1"` is what makes focus actually MOVE here: without it a browser scrolls to
+   the element but leaves focus on the link, so the next Tab returns to the chrome the learner just skipped. */
+#main-content:focus {
+  outline: none;
+}

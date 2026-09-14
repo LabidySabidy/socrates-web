@@ -78,7 +78,7 @@ export function HomePage({
   const graded = METRIC_STATES.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
 
   return (
-    <main className="page">
+    <main className="page" id="main-content" tabIndex={-1}>
       <h1 className="display greeting">{greeting()}</h1>
       <p className="greeting-sub reading">
         {visible.length === 0

@@ -471,7 +471,7 @@ export function LessonPage({
       </nav>
 
       <div className="lesson-scroll" ref={scrollRef}>
-        <div className="console">
+        <div className="console" id="main-content" tabIndex={-1}>
           <div className="eyebrow">AI activity · {tree?.title ?? courseId}</div>
           <h1 className="display lesson-title">{humanize(unit?.title ?? "Lesson")}</h1>
 
