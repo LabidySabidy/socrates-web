@@ -11,6 +11,15 @@
   --ink-70: rgba(32, 31, 29, 0.7);
   --ink-55: rgba(32, 31, 29, 0.55);
   --ink-45: rgba(32, 31, 29, 0.45);
+  /**
+   * The small uppercase LABEL ink, separate from --ink-45 deliberately.
+   *
+   * --ink-45 is used by 24 rules, most of them body-adjacent text where a darker value would alter a
+   * hierarchy this fix is not about. It measures 2.8:1 at 10px, which fails WCAG AA (4.5:1) for small text.
+   * 62% alpha composites to ~4.9:1 on the page background and ~4.6:1 on the tinted rail row, so the label
+   * treatment can pass on both surfaces.
+   */
+  --ink-label: rgba(32, 31, 29, 0.66);
 
   --rule: rgba(32, 31, 29, 0.12);
   --rule-soft: rgba(32, 31, 29, 0.07);
@@ -80,10 +89,10 @@ button.primary:hover { background: var(--action-tint); }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 
 .eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-45);
+  color: var(--ink-label);
 }
 
 .num { font-variant-numeric: tabular-nums; }
@@ -237,7 +246,7 @@ button.primary:hover { background: var(--action-tint); }
 .unit[aria-current="true"] .unit-title { font-weight: 600; }
 .unit .unit-body { flex: 1; min-width: 0; }
 .unit .unit-title { font-family: var(--reading); font-size: 13.5px; line-height: 1.35; }
-.unit .unit-n { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-45); }
+.unit .unit-n { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-label); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 16px 20px 14px; border-top: 1px solid var(--rule); margin-top: 12px; }
 .legend .item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink-55); }
@@ -262,7 +271,7 @@ button.primary:hover { background: var(--action-tint); }
 .mod .icon { color: var(--ink-55); flex: none; display: flex; }
 .mod .mod-body { flex: 1; min-width: 0; }
 .mod .mod-title { font-family: var(--reading); font-size: 14.5px; }
-.mod .mod-type { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-45); }
+.mod .mod-type { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-label); }
 .mod .mod-missing { color: var(--warning-strong); font-size: 11.5px; }
 .mod .due { font-size: 10.5px; color: var(--warning-strong); }
 
@@ -273,7 +282,7 @@ button.primary:hover { background: var(--action-tint); }
   padding: 20px;
   margin-top: 20px;
 }
-.telemetry h2 { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-45); margin: 0 0 10px; font-weight: 400; }
+.telemetry h2 { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-label); margin: 0 0 10px; font-weight: 400; }
 
 .memory { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .memory .value { font-family: var(--display); font-size: 30px; }
@@ -281,7 +290,7 @@ button.primary:hover { background: var(--action-tint); }
 .memory .note { font-size: 11px; color: var(--ink-45); margin: 0 0 16px; }
 
 .sm2-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-.sm2-table th { text-align: left; font-weight: 400; color: var(--ink-45); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 6px; }
+.sm2-table th { text-align: left; font-weight: 400; color: var(--ink-label); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 6px; }
 .sm2-table td { padding: 5px 0; border-top: 1px solid var(--rule-soft); color: var(--ink-70); }
 
 .tray { border-top: 2px solid var(--s-root); padding-top: 14px; margin-top: 22px; }
@@ -356,7 +365,7 @@ button.primary:hover { background: var(--action-tint); }
 /* ------------------------------------------------- journal panel */
 
 .journal { border-top: 1px solid var(--rule); padding: 20px; margin-top: 20px; }
-.journal h2 { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-45); margin: 0 0 10px; font-weight: 400; }
+.journal h2 { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-label); margin: 0 0 10px; font-weight: 400; }
 .session { border: 1px solid var(--rule); border-radius: 6px; padding: 9px 12px; margin-bottom: 8px; background: var(--surface); }
 .session header { display: flex; align-items: center; gap: 10px; }
 .session-when { font-family: var(--reading); font-size: 12.5px; }
