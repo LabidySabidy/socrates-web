@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { fetchJournal, fetchSessionMarkdown } from "../api.ts";
 import { sessionMisconceptionLine, stripAbsolutePaths } from "../session-note.ts";
 import { fetchContinuity, type ContinuityResponse } from "../api.ts";
+import { humanMessage } from "../course-error.ts";
 import type { Journal } from "../types.ts";
 import { formatDay } from "../select.ts";
 import { humanize } from "../humanize.ts";
@@ -62,7 +63,7 @@ export function JournalPanel({ courseId }: { courseId: string }) {
     return (
       <section className="journal" aria-label="Sessions">
         <h2>Sessions</h2>
-        <p className="tray-empty">Could not read the journal: {error}</p>
+        <p className="tray-empty">Could not read the journal. {humanMessage(error)}</p>
       </section>
     );
   }
@@ -106,7 +107,7 @@ export function JournalPanel({ courseId }: { courseId: string }) {
             {opened?.file === s.file ? (
               <div className="session-body reading">
                 {opened.error ? (
-                  <p className="notice">{opened.error}</p>
+                  <p className="notice">{humanMessage(opened.error)}</p>
                 ) : (
                   <pre className="session-md">{stripAbsolutePaths(opened.text ?? "")}</pre>
                 )}

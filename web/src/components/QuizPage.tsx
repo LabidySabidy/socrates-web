@@ -30,6 +30,7 @@ import {
 } from "../quiz.ts";
 import { gradingMode } from "../assessment-types.ts";
 import { humanize } from "../humanize.ts";
+import { humanMessage } from "../course-error.ts";
 
 export function QuizPage({
   courseId,
@@ -196,8 +197,8 @@ export function QuizPage({
         </nav>
         <main className="page">
           <h1 className="display greeting">This quiz could not be prepared</h1>
-          <p className="greeting-sub reading">{data.error}</p>
-          {data.detail ? <p className="notice">{data.detail}</p> : null}
+          <p className="greeting-sub reading">{humanMessage(data.error)}</p>
+          {data.detail ? <p className="notice">{humanMessage(data.detail)}</p> : null}
           {/* A SUMMARY of what arrived, never the model's text: when it has produced items that text IS
               the answer key. A `p`, not a `pre` — this is a sentence, not a code sample. */}
           {data.excerpt ? <p className="notice excerpt-summary">{data.excerpt}</p> : null}

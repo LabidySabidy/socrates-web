@@ -27,7 +27,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
-import { courseErrorView, shouldFollowRename } from "./course-error.ts";
+import { courseErrorView, humanMessage, looksLikeDeveloperText, shouldFollowRename } from "./course-error.ts";
 import { moduleAskHref } from "./grill.ts";
 import { sessionMisconceptionLine, stripAbsolutePaths } from "./session-note.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
@@ -1601,4 +1601,72 @@ test("the course page prefers the tree's title over the list's label", () => {
     line!.indexOf("tree.title") < line!.indexOf("current?.label"),
     "…and before the list label",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Group 1 — a rejection must never show the learner developer text
+// ---------------------------------------------------------------------------
+
+test("known server failures map to human copy", () => {
+  const cases: [string, RegExp][] = [
+    ['that subject has no usable letters or digits: "!!! ???"', /letter or number/i],
+    ['a course called "taken" already exists — pick a different title', /already a course called/i],
+    ["unknown course: locked", /no course called/i],
+    ["could not reach the server", /could not reach the app/i],
+    ["title is 95 characters; the limit is 80", /too long/i],
+    ["a subject is required", /name first/i],
+    ["chat is disabled", /switched off/i],
+    ["the agent did not finish within 180s", /took too long/i],
+  ];
+  for (const [raw, expected] of cases) {
+    const shown = humanMessage(raw);
+    assert.match(shown, expected, `for ${JSON.stringify(raw)} got ${JSON.stringify(shown)}`);
+    assert.ok(!looksLikeDeveloperText(shown), `leaked developer text: ${shown}`);
+  }
+});
+
+test("unknown failures still say something human, never the raw string", () => {
+  assert.equal(humanMessage(""), "Something went wrong. Try again.");
+  assert.equal(humanMessage(undefined), "Something went wrong. Try again.");
+  // A path, a stack, or a quoted payload is never shown whatever it says.
+  for (const raw of [
+    "EPERM: operation not permitted, rename 'C:\\Users\\x' -> 'C:\\Users\\y'",
+    "at Module._compile (node:internal/modules/cjs/loader.js:1101:14)",
+    "/home/kasim/.socrates/courses/x is unreadable",
+    'something: "a quoted payload with the whole input"',
+  ]) {
+    const shown = humanMessage(raw);
+    assert.ok(!looksLikeDeveloperText(shown), `leaked developer text for ${raw}: ${shown}`);
+    assert.ok(shown.length > 0, "never empty");
+  }
+});
+
+test("a genuine sentence from the server still reaches the learner", () => {
+  // The rule is "never developer text", not "never the server's words" — a short human sentence passes.
+  assert.equal(humanMessage("The tutor is busy."), "The tutor is busy.");
+});
+
+test("no component renders a raw error string without mapping it", () => {
+  // The eight sites. Each must either map through humanMessage/courseErrorView or be listed here with the
+  // reason it does not need to (checked by asserting the render expression, not by grepping for absence).
+  const dir = join(import.meta.dirname, "components");
+  const files = ["ManageCourses.tsx", "EditableTitle.tsx", "LessonPage.tsx", "HomePage.tsx", "JournalPanel.tsx", "QuizPage.tsx", "LabPage.tsx"];
+  const offenders: string[] = [];
+  for (const f of files) {
+    const src = readFileSync(join(dir, f), "utf8");
+    const lines = src.split("\n");
+    lines.forEach((line, i) => {
+      // A JSX render of a bare error variable is the pattern that showed developer text.
+      const jsx = line.trim();
+      // A BARE interpolation of an error variable is the pattern that showed developer text. A wrapped one
+      // — `{humanMessage(error)}`, `{view.detail}` — is the fix, so it must not be flagged.
+      const bare = /^\{error\}$/.test(jsx) || /^\{opened\.error\}$/.test(jsx) || /^\{data\.error\}$/.test(jsx);
+      const inline = /<p[^>]*>\{(?!humanMessage|view\.detail)[^}]*error[^}]*\}<\/p>/.test(jsx);
+      const bareDetail = /^<p[^>]*>\{data\.detail\}<\/p>\s*\}?\s*:?/.test(jsx);
+      if (bare || inline || bareDetail) {
+        offenders.push(`${f}:${i + 1} -> ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], `these render a raw error:\n${offenders.join("\n")}`);
 });

@@ -16,6 +16,7 @@ import { MasteryRing } from "./MasteryRing.tsx";
 import { ContinueStrip } from "./ContinueStrip.tsx";
 import { ManageCourses } from "./ManageCourses.tsx";
 import { hrefCourse } from "../router.ts";
+import { humanMessage } from "../course-error.ts";
 import { EditableTitle } from "./EditableTitle.tsx";
 import { filterCourses, totalMasteryCounts } from "../select.ts";
 
@@ -60,7 +61,7 @@ export function HomePage({
     return (
       <main className="page">
         <h1 className="display greeting">Cannot reach the server</h1>
-        <p className="greeting-sub reading">{error}</p>
+        <p className="greeting-sub reading">{humanMessage(error)}</p>
       </main>
     );
   }

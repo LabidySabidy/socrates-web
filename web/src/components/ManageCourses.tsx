@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { createCourseFromSubject } from "../api.ts";
 import { scaffoldHref } from "../grill.ts";
+import { humanMessage } from "../course-error.ts";
 import type { CourseRef } from "../types.ts";
 
 export function ManageCourses({
@@ -83,7 +84,7 @@ export function ManageCourses({
 
           {error ? (
             <p className="notice" role="status">
-              {error}
+              {humanMessage(error)}
             </p>
           ) : null}
 

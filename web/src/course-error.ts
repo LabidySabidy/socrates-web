@@ -70,3 +70,113 @@ export function shouldFollowRename(input: {
   if (busy) return false;
   return alreadyFollowed !== `${from}->${to}`;
 }
+
+/**
+ * Group 1 — turn any server failure into something a learner can read.
+ *
+ * `web/src/api.ts` lifts `body.error` verbatim into a thrown `Error`, and components rendered
+ * `err.message` unchanged, so learners read developer text: raw `JSON.stringify` quotes
+ * (`that subject has no usable letters or digits: "!!! ???"`), filesystem paths, and internal phrasings
+ * like `unknown course: <slug>`. Eight sites did this.
+ *
+ * ONE place maps, deliberately: `courseErrorView` above already existed for the course-load case, so this
+ * is its sibling rather than a second pattern. `messageFor` is the general path; `courseErrorView` stays
+ * for the two pages that want the rename-aware heading.
+ *
+ * THE DIAGNOSTIC IS NOT SWALLOWED. `humanMessage` returns copy for the learner, and the raw string is
+ * preserved by the caller (it is already in the thrown Error and in the server's log) — the learner sees
+ * copy, the developer keeps the evidence.
+ */
+
+/**
+ * A filesystem path, a stack frame, or a quote-wrapped payload — the three things that must never reach
+ * a learner. Used both to write the copy and to assert it in tests.
+ */
+export function looksLikeDeveloperText(text: string): boolean {
+  const windowsPath = /[A-Za-z]:\\/.test(text);
+  const posixPath = /(^|\s)\/(?:home|Users|var|tmp)\//.test(text);
+  const stackFrame = /\bat\s+\S+\s*\(/.test(text);
+  const quotedPayload = /:\s*"[\s\S]*"$/.test(text.trim());
+  return windowsPath || posixPath || stackFrame || quotedPayload;
+}
+
+/** Known server phrasings and what to say instead. Ordered: the first match wins. */
+const MAPPINGS: { match: RegExp; human: (m: RegExpExecArray) => string }[] = [
+  {
+    // `that subject has no usable letters or digits: "!!! ???"`
+    match: /no usable letters or digits/i,
+    human: () =>
+      "That name needs at least one letter or number — punctuation and symbols alone will not work.",
+  },
+  {
+    // `a course called "x" already exists` / `a title whose slug already exists`
+    match: /a course called "([^"]+)" already exists|already exists/i,
+    human: (m) =>
+      m[1]
+        ? `There is already a course called “${m[1]}”. Pick a different name.`
+        : "That name is already taken. Pick a different one.",
+  },
+  {
+    match: /a subject is required|a title is required|title is required/i,
+    human: () => "Give it a name first.",
+  },
+  {
+    match: /title is \d+ characters; the limit is (\d+)/i,
+    human: (m) => `That name is too long — keep it under ${m[1]} characters.`,
+  },
+  {
+    match: /unknown course:?\s*([^\s"]*)/i,
+    human: (m) =>
+      m[1]
+        ? `There is no course called “${m[1]}” any more. It may have been renamed.`
+        : "That course could not be found. It may have been renamed.",
+  },
+  {
+    match: /a turn for another course is active/i,
+    human: () => "The tutor is still working on another course. Wait for it to finish.",
+  },
+  {
+    match: /a chat turn is already in progress|an SSE stream is already active/i,
+    human: () => "The tutor is still answering. Wait for that reply first.",
+  },
+  {
+    match: /chat is disabled/i,
+    human: () => "The tutor is switched off in this build.",
+  },
+  {
+    match: /could not reach the server|failed to fetch|networkerror/i,
+    human: () => "Could not reach the app. Check that it is still running, then try again.",
+  },
+  {
+    match: /no such session|no learning folder|no MISSION\.md|has no MISSION/i,
+    human: () => "That record is not there any more.",
+  },
+  {
+    match: /timed out|did not finish within/i,
+    human: () => "The tutor took too long to answer. Try again.",
+  },
+  {
+    match: /HTTP 5\d\d|internal/i,
+    human: () => "Something went wrong on our side. Try again.",
+  },
+];
+
+/**
+ * The learner-facing message for a failure of any kind.
+ *
+ * Unknown failures fall back to a human, non-empty sentence — never the raw string. The raw text is
+ * available on the thrown Error for logs and tests; this function is only for display.
+ */
+export function humanMessage(raw: unknown): string {
+  const text = (raw instanceof Error ? raw.message : String(raw ?? "")).trim();
+  if (!text) return "Something went wrong. Try again.";
+  for (const { match, human } of MAPPINGS) {
+    const m = match.exec(text);
+    if (m) return human(m);
+  }
+  // A path or a stack is never shown, whatever it says.
+  if (looksLikeDeveloperText(text)) return "Something went wrong. Try again.";
+  // Anything else is short and unrecognised; show it, trimmed of a trailing quoted payload, so a genuine
+  // sentence from the server still reaches the learner.
+  return text.replace(/:\s*"[\s\S]*"$/, ".").slice(0, 200);
+}

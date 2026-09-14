@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { renameCourse } from "../api.ts";
+import { humanMessage } from "../course-error.ts";
 
 export function EditableTitle({
   courseId,
@@ -115,7 +116,7 @@ export function EditableTitle({
       />
       {error ? (
         <span className="notice title-error" role="status">
-          {error}
+          {humanMessage(error)}
         </span>
       ) : null}
     </span>

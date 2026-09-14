@@ -19,7 +19,7 @@ import {
 } from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
-import { courseErrorView, shouldFollowRename } from "../course-error.ts";
+import { courseErrorView, humanMessage, shouldFollowRename } from "../course-error.ts";
 import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
 
@@ -439,7 +439,7 @@ export function LessonPage({
 
           {error ? (
             <p className="notice" role="status">
-              {error}
+              {humanMessage(error)}
             </p>
           ) : null}
 

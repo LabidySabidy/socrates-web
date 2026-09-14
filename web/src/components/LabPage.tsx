@@ -11,6 +11,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { humanize } from "../humanize.ts";
+import { humanMessage } from "../course-error.ts";
 import { fetchCourse, fetchInteractives, generateInteractives } from "../api.ts";
 import type { Interactive, InteractivesResponse, SliderSpec, TargetWindowSpec } from "../interactives-types.ts";
 import type { CourseTree, Unit } from "../types.ts";
@@ -262,8 +263,8 @@ export function LabPage({
         {bar}
         <main className="page">
           <h1 className="display greeting">This interactive could not be prepared</h1>
-          <p className="greeting-sub reading">{data.error}</p>
-          {data.detail ? <p className="notice">{data.detail}</p> : null}
+          <p className="greeting-sub reading">{humanMessage(data.error)}</p>
+          {data.detail ? <p className="notice">{humanMessage(data.detail)}</p> : null}
           {/* A SUMMARY of what arrived, never the model's text: when it has produced items that text IS
               the answer key. A `p`, not a `pre` — this is a sentence, not a code sample. */}
           {data.excerpt ? <p className="notice excerpt-summary">{data.excerpt}</p> : null}
