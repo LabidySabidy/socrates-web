@@ -459,6 +459,16 @@ handshake question should start by reading it.
       dictionary.
       **Done when:** tests cover a slug, a snake_case name, an already-human name (unchanged), an
       acronym slug (`kpi` → `Kpi`, documented as the known limitation), and empty/whitespace input.
+      **REVISED (follow-up):** the convention is SENTENCE CASE, not Title Case. One test decides
+      everything — a `-` or `_` means the string is an identifier, so lowercase it and capitalise only
+      the first word (`e46-drift-target-spec` → `E46 drift target spec`); no separator means it is text
+      someone wrote, returned unchanged. Title-casing every chunk capitalised connectives
+      (`Bump Steer And Roll Centre`), the tell of a machine, and it read differently from a fresh
+      scaffold in the same library. No connective rules — that is the dictionary trap in another shape.
+      **Two consequences, recorded not papered over:** a SINGLE-WORD slug has no separator and so is
+      left exactly as written (`kpi` stays `kpi`), and an authored name containing a hyphen loses it
+      (`front-toe` → `Front toe`) — which is why the skill now says to keep hyphens and underscores out
+      of card headings and use spaces. The fix for casing is authoring, not cleverness.
 - [x] **T-053** The scaffold skill authors HUMAN concept headings, and the SCHEMA template shows a human
       placeholder rather than `<concept-name>`.
       **Done when:** the skill's Step 6 states the heading is the NAME and the slug is derived, with the
