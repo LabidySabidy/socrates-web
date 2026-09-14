@@ -23,6 +23,7 @@ export type Route =
   | { name: "lesson"; courseId: string; unit: number | undefined; ask: string | null }
   | { name: "quiz"; courseId: string; unit: number }
   | { name: "lab"; courseId: string; unit: number }
+  | { name: "reports" }
   | { name: "unknown"; raw: string };
 
 export function parseHash(hash: string): Route {
@@ -32,6 +33,7 @@ export function parseHash(hash: string): Route {
   const parts = path.split("/").filter(Boolean);
   const ask = params.get("ask");
   if (parts.length === 0 || parts[0] === "home") return { name: "home" };
+  if (parts[0] === "reports") return { name: "reports" };
   if (parts[0] === "lesson" && parts[1]) {
     // Preserve what was asked for. A missing segment is undefined (default to the first unit); a present
     // one is passed through AS PARSED, so the page can refuse it rather than silently substituting unit 1.

@@ -254,3 +254,76 @@ export interface ContinuityResponse {
 /** Progress, badge state and resolved misconceptions carried across sittings. */
 export const fetchContinuity = (id: string) =>
   get<ContinuityResponse>(`/api/courses/${encodeURIComponent(id)}/continuity`);
+
+// ---------------------------------------------------------------------------
+// Bug reports — a testing tool, not a user-facing feature.
+// ---------------------------------------------------------------------------
+
+export interface ReportSummary {
+  id: string;
+  at: string;
+  whatIsWrong: string;
+  expected: string;
+  route: string;
+  course: string | null;
+  unit: number | null;
+  appVersion: string | null;
+  hasImage: boolean;
+}
+
+export interface Report extends ReportSummary {
+  transcript?: { role: "user" | "assistant"; text: string }[];
+}
+
+/** Newest first, and WITHOUT image bytes or transcripts — a listing must not ship megabytes. */
+export const fetchReports = () => get<{ reports: ReportSummary[] }>("/api/reports");
+
+/** One report, including `hasImage` and the transcript when it was attached. */
+export const fetchReport = (id: string) => get<Report>(`/api/reports/${encodeURIComponent(id)}`);
+
+/** The PNG on its own route, so no base64 is inlined anywhere. */
+export const reportImageUrl = (id: string) => `/api/reports/${encodeURIComponent(id)}/image`;
+
+export interface SaveReportResult {
+  ok: boolean;
+  id?: string;
+  error?: string;
+}
+
+/**
+ * Submit a report.
+ *
+ * The image travels as base64 because a browser cannot POST raw bytes inside a JSON body; the server decodes
+ * it and enforces the size cap on the DECODED length. A capture failure is never a reason to withhold the
+ * report: `imageBase64` is simply omitted and the text still saves.
+ */
+export async function postReport(input: {
+  whatIsWrong: string;
+  expected?: string;
+  route: string;
+  course?: string | null;
+  unit?: number | null;
+  appVersion?: string | null;
+  imageBase64?: string | null;
+  transcript?: { role: "user" | "assistant"; text: string }[] | null;
+}): Promise<SaveReportResult> {
+  const res = await fetch("/api/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  let body: { report?: { id: string }; error?: string } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    /* a non-JSON body is still a failure */
+  }
+  if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+  return { ok: true, id: body.report?.id };
+}
+
+/** Delete a report, removing BOTH files server-side so no orphan remains. */
+export async function deleteReport(id: string): Promise<boolean> {
+  const res = await fetch(`/api/reports/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return res.ok;
+}

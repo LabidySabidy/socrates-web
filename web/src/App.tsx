@@ -10,6 +10,8 @@ import { CoursePage } from "./components/CoursePage.tsx";
 import { LessonPage } from "./components/LessonPage.tsx";
 import { QuizPage } from "./components/QuizPage.tsx";
 import { LabPage } from "./components/LabPage.tsx";
+import { ReportsPage } from "./components/ReportsPage.tsx";
+import { ReportBugPanel, readTranscript } from "./components/ReportBugPanel.tsx";
 
 export function App() {
   const { route, sequence } = useNavigation();
@@ -17,6 +19,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   /** Global, as the original header checkbox was; the server applies it to the prompt. */
   const [budapest, setBudapest] = useState(false);
+  /** The bug-report panel. Global, so it is available on every route. */
+  const [reporting, setReporting] = useState(false);
 
   const load = useCallback(() => {
     fetchCourses()
@@ -57,7 +61,12 @@ export function App() {
       >
         Skip to content
       </a>
-      <TopBar courseCount={data ? visible.length : null} budapest={budapest} onBudapestChange={setBudapest} />
+      <TopBar
+        courseCount={data ? visible.length : null}
+        budapest={budapest}
+        onBudapestChange={setBudapest}
+        onReportBug={() => setReporting((v) => !v)}
+      />
       {route.name === "lab" ? (
         <LabPage
           courseId={route.courseId}
@@ -86,6 +95,8 @@ export function App() {
             window.location.hash = hrefCourse(route.courseId, route.unit).slice(1);
           }}
         />
+      ) : route.name === "reports" ? (
+        <ReportsPage />
       ) : route.name === "course" ? (
         <CoursePage courseId={route.courseId} unitNumber={route.unit} courses={visible} />
       ) : (
@@ -96,6 +107,16 @@ export function App() {
           onChanged={load}
         />
       )}
+      {/* Docked, not modal: the page stays visible so the owner can describe what is under the panel. */}
+      {reporting ? (
+        <ReportBugPanel
+          onClose={() => setReporting(false)}
+          route={window.location.hash || "#/home"}
+          course={"courseId" in route ? route.courseId : null}
+          unit={"unit" in route ? (route.unit as number) : null}
+          transcript={readTranscript()}
+        />
+      ) : null}
     </>
   );
 }

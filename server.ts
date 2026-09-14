@@ -30,6 +30,14 @@ import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { parseHistory } from "./history.ts";
 import { buildContinuity, lessonMode } from "./continuity.ts";
 import {
+  MAX_IMAGE_BYTES,
+  deleteReport,
+  imagePath,
+  listReports,
+  readFullReport,
+  saveReport,
+} from "./reports.ts";
+import {
   courseRefs,
   courseDir,
   createCourse,
@@ -649,6 +657,124 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     const url = (req.url || "/").split("?")[0];
 
     // --- courses -------------------------------------------------------------
+    /**
+     * --- bug reports ---------------------------------------------------------
+     *
+     * A testing tool for one person: capture a defect at the moment it is seen, review the pile afterwards.
+     * Reports live BESIDE the courses store, not in a course (see `reports.ts` for why).
+     *
+     * The listing returns no image bytes and no transcript; the image has its own route. A listing that
+     * shipped megabytes would make the review screen unusable on the connection that produced it.
+     */
+    if (url === "/api/reports" && req.method === "GET") {
+      sendJson(res, 200, { reports: listReports(storeEnv) });
+      return;
+    }
+
+    if (url === "/api/reports" && req.method === "POST") {
+      let body: {
+        whatIsWrong?: unknown;
+        expected?: unknown;
+        route?: unknown;
+        course?: unknown;
+        unit?: unknown;
+        appVersion?: unknown;
+        imageBase64?: unknown;
+        transcript?: unknown;
+      };
+      try {
+        body = JSON.parse((await readBody(req)) || "{}") as typeof body;
+      } catch {
+        sendJson(res, 400, { error: "body must be JSON" });
+        return;
+      }
+      if (typeof body.whatIsWrong !== "string" || !body.whatIsWrong.trim()) {
+        sendJson(res, 400, { error: "a description is required" });
+        return;
+      }
+
+      // The image arrives base64 (a browser cannot post bytes in JSON) and is decoded here, so the SIZE CAP
+      // is enforced on the decoded length rather than on the inflated string — a cap checked on the encoded
+      // form would be ~33% wrong.
+      let image: Buffer | null = null;
+      if (typeof body.imageBase64 === "string" && body.imageBase64) {
+        const b64 = body.imageBase64.replace(/^data:image\/png;base64,/, "");
+        image = Buffer.from(b64, "base64");
+        if (image.length > MAX_IMAGE_BYTES) {
+          sendJson(res, 413, {
+            error: `that capture is ${(image.length / 1024 / 1024).toFixed(1)} MB; the limit is ${MAX_IMAGE_BYTES / 1024 / 1024} MB`,
+          });
+          return;
+        }
+      }
+
+      const transcript = Array.isArray(body.transcript)
+        ? (body.transcript as { role?: unknown; text?: unknown }[])
+            .filter((x) => (x?.role === "user" || x?.role === "assistant") && typeof x?.text === "string")
+            .map((x) => ({ role: x.role as "user" | "assistant", text: String(x.text) }))
+        : null;
+
+      const saved = saveReport(
+        {
+          whatIsWrong: body.whatIsWrong,
+          expected: typeof body.expected === "string" ? body.expected : "",
+          route: typeof body.route === "string" ? body.route : "",
+          course: typeof body.course === "string" ? body.course : null,
+          unit: typeof body.unit === "number" ? body.unit : null,
+          appVersion: typeof body.appVersion === "string" ? body.appVersion : null,
+          image,
+          transcript,
+        },
+        storeEnv,
+      );
+      if (!saved.ok) {
+        sendJson(res, 400, { error: saved.error });
+        return;
+      }
+      console.log(`[report] ${saved.report.id}${saved.report.hasImage ? " (+image)" : ""}`);
+      sendJson(res, 201, { ok: true, report: saved.report });
+      return;
+    }
+
+    const reportImageMatch = /^\/api\/reports\/([^/]+)\/image$/.exec(url);
+    if (reportImageMatch && req.method === "GET") {
+      const stem = decodeURIComponent(reportImageMatch[1]);
+      const file = imagePath(stem, storeEnv);
+      if (!file) {
+        sendJson(res, 404, { error: "no image for that report" });
+        return;
+      }
+      try {
+        const bytes = readFileSync(file);
+        res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(bytes.length) });
+        res.end(bytes);
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    const reportMatch = /^\/api\/reports\/([^/]+)$/.exec(url);
+    if (reportMatch && req.method === "GET") {
+      const report = readFullReport(decodeURIComponent(reportMatch[1]), storeEnv);
+      if (!report) {
+        sendJson(res, 404, { error: "no such report" });
+        return;
+      }
+      sendJson(res, 200, report);
+      return;
+    }
+
+    if (reportMatch && req.method === "DELETE") {
+      const removed = deleteReport(decodeURIComponent(reportMatch[1]), storeEnv);
+      if (!removed) {
+        sendJson(res, 404, { error: "no such report" });
+        return;
+      }
+      sendJson(res, 200, { ok: true, id: decodeURIComponent(reportMatch[1]) });
+      return;
+    }
+
     if (url === "/api/courses" && req.method === "GET") {
       const result = discover();
       // B3 one level up — the catalogue gets the same rule as the detail read, and the same warning

@@ -23,6 +23,7 @@ import { resolveUnit } from "../unit-selection.ts";
 import { courseErrorView, humanMessage, shouldFollowRename } from "../course-error.ts";
 import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
+import { publishTranscript } from "./ReportBugPanel.tsx";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { humanize } from "../humanize.ts";
@@ -270,6 +271,14 @@ export function LessonPage({
   // G2 — the resolution is a decision, not a fallback expression: "no unit asked for" defaults to the
   // first, while "a unit that does not exist" is reported as such rather than silently showing unit 1.
   const resolution = tree ? resolveUnit(tree.units, unitNumber) : null;
+  /**
+   * Publish the settled conversation so the report panel can offer to attach it. "The tutor said X" is
+   * unactionable a week later without it, which is the whole reason the checkbox exists.
+   */
+  useEffect(() => {
+    publishTranscript(history.map((m) => ({ role: m.role, text: m.text })));
+  }, [history]);
+
   const unit: Unit | null =
     resolution && (resolution.kind === "found" || resolution.kind === "default") ? resolution.unit : null;
   const outOfRange = resolution?.kind === "out-of-range" ? resolution : null;

@@ -17,12 +17,15 @@ export function TopBar({
   courseCount,
   budapest,
   onBudapestChange,
+  onReportBug,
   right,
 }: {
   courseCount: number | null;
   /** Global, as the original header checkbox was. */
   budapest: boolean;
   onBudapestChange: (value: boolean) => void;
+  /** Opens the report panel. Lives here because a defect is not per-page. */
+  onReportBug: () => void;
   right?: ReactNode;
 }) {
   return (
@@ -44,6 +47,19 @@ export function TopBar({
         />
         Budapest Mode
       </label>
+      {/* The capture control: GLOBAL, because a defect is not per-page. The review link sits beside it so
+          the list is one click from anywhere rather than buried inside the capture panel. */}
+      <a className="report-link" href="#/reports" title="Review the reports you have filed">
+        Reports
+      </a>
+      <button
+        type="button"
+        className="report-trigger"
+        onClick={() => onReportBug()}
+        title="Capture what you are looking at and describe what is wrong"
+      >
+        Report a bug
+      </button>
       {right}
     </header>
   );
