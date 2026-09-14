@@ -1209,42 +1209,57 @@ test("a reload frame still works, and anything else is ignored rather than guess
 // humanize: display names, never ids
 // ---------------------------------------------------------------------------
 
-test("a slug becomes words", () => {
-  assert.equal(humanize("wheel-anatomy-and-tension-model"), "Wheel Anatomy And Tension Model");
-  assert.equal(humanize("front-toe-spec-reading"), "Front Toe Spec Reading");
+test("a slug becomes a sentence, not Title Case", () => {
+  // Sentence case is the one convention. Title-casing every chunk capitalises connectives, which is
+  // the tell of a machine and reads differently from a newly scaffolded course in the same library.
+  assert.equal(humanize("wheel-anatomy-and-tension-model"), "Wheel anatomy and tension model");
+  assert.equal(humanize("front-toe-spec-reading"), "Front toe spec reading");
+  assert.equal(humanize("bump-steer-and-roll-centre"), "Bump steer and roll centre");
 });
 
-test("snake_case and mixed separators become words", () => {
-  assert.equal(humanize("thrust_angle"), "Thrust Angle");
-  assert.equal(humanize("string-method_setup"), "String Method Setup");
+test("snake_case and mixed separators become a sentence", () => {
+  assert.equal(humanize("thrust_angle"), "Thrust angle");
+  assert.equal(humanize("string-method_setup"), "String method setup");
   // runs of separators collapse rather than producing empty words
-  assert.equal(humanize("a--b__c"), "A B C");
+  assert.equal(humanize("a--b__c"), "A b c");
 });
 
-test("already-human text is unchanged, so applying it twice is applying it once", () => {
-  // The invariant is idempotence: a course whose cards are already authored as words must not be
-  // mangled by the same code path that fixes legacy slugs.
-  const human = "Wheel Anatomy And Tension Model";
-  assert.equal(humanize(human), human);
-  assert.equal(humanize(humanize("wheel-anatomy")), humanize("wheel-anatomy"));
-  assert.equal(humanize("Alignment"), "Alignment");
-  // Sentence case a human wrote is left alone: only separator-delimited chunks are capitalised, so
-  // this cannot mangle an authored name into Title Cased Prose.
+test("an identifier with a leading acronym keeps it, and lowercases the rest", () => {
+  // The digits survive the slugger, so the acronym is recoverable here — this is the case that shows
+  // why names should be authored as words without needing a dictionary.
+  assert.equal(humanize("e46-drift-target-spec"), "E46 drift target spec");
+});
+
+test("text with no separator is returned UNCHANGED, so authored names are never mangled", () => {
+  // This is the whole safety property: the only signal that a string is an identifier is that it
+  // contains `-` or `_`. Everything else is a name someone wrote, and it passes through as-is.
   assert.equal(humanize("Camber and toe"), "Camber and toe");
   assert.equal(humanize("Wheel anatomy and tension model"), "Wheel anatomy and tension model");
+  assert.equal(humanize("Alignment"), "Alignment");
+  assert.equal(humanize("already Title Cased By Hand"), "already Title Cased By Hand");
 });
 
-test("casing the slugger already destroyed is not recovered, and is not guessed at", () => {
-  // Kpi, not KPI. A dictionary would be guessing, and a wrong expansion is worse than a plain one.
-  assert.equal(humanize("kpi"), "Kpi");
-  assert.equal(humanize("sai"), "Sai");
-  assert.equal(humanize("e46"), "E46");
+test("applying it twice is applying it once", () => {
+  // Idempotence is what lets the display layer and the source layer coexist without fighting.
+  assert.equal(humanize(humanize("wheel-anatomy")), humanize("wheel-anatomy"));
+  assert.equal(humanize(humanize("Camber and toe")), "Camber and toe");
+  assert.equal(humanize(humanize("e46-drift-target-spec")), "E46 drift target spec");
 });
 
-test("empty and whitespace-only names produce nothing rather than a stray word", () => {
+test("an acronym inside an identifier is lowercased unless the identifier has separators", () => {
+  // With separators the first word is capitalised, so `kpi-baseline-review` reads correctly.
+  assert.equal(humanize("kpi-baseline-review"), "Kpi baseline review");
+  // A SINGLE-WORD slug is indistinguishable from a word someone wrote, and the rule is that text with no
+  // separator is returned unchanged — so this stays lowercase. That is the honest cost of the rule, and
+  // the fix is authoring names as words, not a dictionary.
+  assert.equal(humanize("kpi"), "kpi");
+  assert.equal(humanize("sai"), "sai");
+});
+
+test("empty input, whitespace and bare separators produce nothing", () => {
   assert.equal(humanize(""), "");
-  assert.equal(humanize("   "), "");
   assert.equal(humanize("-"), "");
+  assert.equal(humanize("__"), "");
 });
 
 // ---------------------------------------------------------------------------

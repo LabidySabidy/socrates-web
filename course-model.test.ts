@@ -340,10 +340,10 @@ test("a legacy slug course derives HUMAN module and group titles, and keeps the 
   const course = buildCourse(load("course-basic"));
   const unit = course.units[0];
 
-  assert.equal(unit.groups[0].title, "Alpha One", "the group heading is human");
+  assert.equal(unit.groups[0].title, "Alpha one", "the group heading is a sentence, not Title Case");
   assert.deepEqual(
     unit.groups[0].modules.slice(0, 3).map((m) => m.title),
-    ["Recite Alpha One", "Review Alpha One", "Explain Alpha One in your own words"],
+    ["Recite Alpha one", "Review Alpha one", "Explain Alpha one in your own words"],
     "the derived titles are display strings, so they are human at the point they are built",
   );
 
@@ -399,6 +399,6 @@ test("casing the slugger destroyed is not recovered — the documented limitatio
   mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
   writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 kpi-baseline-review\n\n- **Status:** 🟨 Fair\n");
   const course = buildCourse(load2(dir));
-  assert.equal(course.units[0].groups[0].title, "Kpi Baseline Review", "Kpi, not KPI — nothing here guesses");
+  assert.equal(course.units[0].groups[0].title, "Kpi baseline review", "Kpi, not KPI — nothing here guesses");
   rmSync(dir, { recursive: true, force: true });
 });
