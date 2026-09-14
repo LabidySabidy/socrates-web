@@ -23,6 +23,9 @@ import { gradingMode, isCorrect, type AssessmentItem } from "./assessment-types.
 import { completionView } from "./completion.ts";
 import { compile, sample } from "./expr.ts";
 import { parseWatchFrame } from "./watch.ts";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { humanize } from "./humanize.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
@@ -1200,4 +1203,98 @@ test("a reload frame still works, and anything else is ignored rather than guess
   assert.equal(parseWatchFrame('{"type":"renamed","to":"only-a-to"}').kind, "other");
   assert.equal(parseWatchFrame(": heartbeat").kind, "other");
   assert.equal(parseWatchFrame("not json at all").kind, "other");
+});
+
+// ---------------------------------------------------------------------------
+// humanize: display names, never ids
+// ---------------------------------------------------------------------------
+
+test("a slug becomes words", () => {
+  assert.equal(humanize("wheel-anatomy-and-tension-model"), "Wheel Anatomy And Tension Model");
+  assert.equal(humanize("front-toe-spec-reading"), "Front Toe Spec Reading");
+});
+
+test("snake_case and mixed separators become words", () => {
+  assert.equal(humanize("thrust_angle"), "Thrust Angle");
+  assert.equal(humanize("string-method_setup"), "String Method Setup");
+  // runs of separators collapse rather than producing empty words
+  assert.equal(humanize("a--b__c"), "A B C");
+});
+
+test("already-human text is unchanged, so applying it twice is applying it once", () => {
+  // The invariant is idempotence: a course whose cards are already authored as words must not be
+  // mangled by the same code path that fixes legacy slugs.
+  const human = "Wheel Anatomy And Tension Model";
+  assert.equal(humanize(human), human);
+  assert.equal(humanize(humanize("wheel-anatomy")), humanize("wheel-anatomy"));
+  assert.equal(humanize("Alignment"), "Alignment");
+  // Sentence case a human wrote is left alone: only separator-delimited chunks are capitalised, so
+  // this cannot mangle an authored name into Title Cased Prose.
+  assert.equal(humanize("Camber and toe"), "Camber and toe");
+  assert.equal(humanize("Wheel anatomy and tension model"), "Wheel anatomy and tension model");
+});
+
+test("casing the slugger already destroyed is not recovered, and is not guessed at", () => {
+  // Kpi, not KPI. A dictionary would be guessing, and a wrong expansion is worse than a plain one.
+  assert.equal(humanize("kpi"), "Kpi");
+  assert.equal(humanize("sai"), "Sai");
+  assert.equal(humanize("e46"), "E46");
+});
+
+test("empty and whitespace-only names produce nothing rather than a stray word", () => {
+  assert.equal(humanize(""), "");
+  assert.equal(humanize("   "), "");
+  assert.equal(humanize("-"), "");
+});
+
+// ---------------------------------------------------------------------------
+// the render-site guard: an identifier must not reach JSX
+// ---------------------------------------------------------------------------
+
+test("no component prints a raw concept or unit identifier", () => {
+  // The failure mode this feature is most likely to have is fixing one surface and missing four, so the
+  // rule is checked mechanically rather than by eye. Each entry is a raw identity expression that has a
+  // display name available; printing it unwrapped puts a slug in front of the learner.
+  const components = readdirSync(join(import.meta.dirname, "components")).filter((f) => f.endsWith(".tsx"));
+  const raw = [
+    "{u.title}",
+    "{unit.title}",
+    "{unit?.title ??",
+    "{selected.title}",
+    "{c.name}",
+    "{row.concept}",
+    "{mod.concept}",
+    "s.concepts.join(",
+    "concepts.join(",
+  ];
+  const offenders: string[] = [];
+  for (const file of components) {
+    const source = readFileSync(join(import.meta.dirname, "components", file), "utf8");
+    for (const needle of raw) {
+      let from = source.indexOf(needle);
+      while (from !== -1) {
+        // `key={c.name}` is an identity, not display: React keys SHOULD be the raw id, so an occurrence
+        // immediately preceded by `key=` is correct code rather than an offender.
+        const before = source.slice(Math.max(0, from - 4), from);
+        if (before !== "key=") offenders.push(`${file}: ${needle}`);
+        from = source.indexOf(needle, from + 1);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `these print an identifier instead of a display name: ${offenders.join(", ")}`);
+});
+
+test("every component that humanises actually imports the function", () => {
+  // A missing import is how this fails silently in one file while the rest look right.
+  const dir = join(import.meta.dirname, "components");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".tsx"));
+  for (const file of files) {
+    const source = readFileSync(join(dir, file), "utf8");
+    if (source.includes("humanize(")) {
+      assert.ok(
+        source.includes('from "../humanize.ts"'),
+        `${file} calls humanize but does not import it`,
+      );
+    }
+  }
 });

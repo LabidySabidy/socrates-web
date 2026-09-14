@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { fetchJournal } from "../api.ts";
 import type { Journal } from "../types.ts";
 import { formatDay } from "../select.ts";
+import { humanize } from "../humanize.ts";
 
 export function JournalPanel({ courseId }: { courseId: string }) {
   const [journal, setJournal] = useState<Journal | null>(null);
@@ -64,7 +65,7 @@ export function JournalPanel({ courseId }: { courseId: string }) {
               {s.open ? <span className="session-open">open</span> : null}
             </header>
             {s.concepts.length > 0 ? (
-              <p className="session-body">Covered {s.concepts.join(", ")}</p>
+              <p className="session-body">Covered {s.concepts.map(humanize).join(", ")}</p>
             ) : null}
             {s.misconceptions > 0 ? (
               <p className="session-body">

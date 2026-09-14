@@ -10,6 +10,7 @@
  * ("suppressed under reduced motion (direct interaction is preserved)").
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { humanize } from "../humanize.ts";
 import { fetchCourse, fetchInteractives, generateInteractives } from "../api.ts";
 import type { Interactive, InteractivesResponse, SliderSpec, TargetWindowSpec } from "../interactives-types.ts";
 import type { CourseTree, Unit } from "../types.ts";
@@ -240,7 +241,7 @@ export function LabPage({
         {unit ? (
           <>
             <span aria-hidden="true"> › </span>
-            <span aria-current="page">{unit.title}</span>
+            <span aria-current="page">{humanize(unit.title)}</span>
           </>
         ) : null}
       </span>
@@ -282,7 +283,7 @@ export function LabPage({
           <h1 className="display greeting">No interactive yet</h1>
           <p className="greeting-sub reading">
             This unit has no authored interactive. The tutor can design one for{" "}
-            {unit ? `“${unit.title}”` : "this unit"}.
+            {unit ? `“${humanize(unit.title)}”` : "this unit"}.
           </p>
           <div className="quiz-actions">
             <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>

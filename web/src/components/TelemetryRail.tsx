@@ -8,6 +8,7 @@
 import type { LearningData } from "../types.ts";
 import { memoryStrength } from "../memory.ts";
 import { MisconceptionTray } from "./MisconceptionTray.tsx";
+import { humanize } from "../humanize.ts";
 
 export function TelemetryRail({
   learning,
@@ -55,10 +56,10 @@ export function TelemetryRail({
                 <td>
                   {grillHref ? (
                     <a className="concept-grill" href={grillHref(c.name)} title="grill this concept">
-                      {c.name}
+                      {humanize(c.name)}
                     </a>
                   ) : (
-                    c.name
+                    humanize(c.name)
                   )}
                 </td>
                 <td className="num">{c.sm2.last_tested}</td>

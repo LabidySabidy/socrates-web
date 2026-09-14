@@ -14,6 +14,7 @@ import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefLesson } from "../router.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
+import { humanize } from "../humanize.ts";
 import { appendUser, settleAssistant, type ChatTurn } from "../transcript.ts";
 import {
   isPassiveText,
@@ -252,7 +253,7 @@ export function LessonPage({
           {unit ? (
             <>
               <span aria-hidden="true"> › </span>
-              <span aria-current="page">{unit.title}</span>
+              <span aria-current="page">{humanize(unit.title)}</span>
             </>
           ) : null}
         </span>
@@ -264,7 +265,7 @@ export function LessonPage({
       <div className="lesson-scroll" ref={scrollRef}>
         <div className="console">
           <div className="eyebrow">AI activity · {tree?.title ?? courseId}</div>
-          <h1 className="display lesson-title">{unit?.title ?? "Lesson"}</h1>
+          <h1 className="display lesson-title">{humanize(unit?.title ?? "Lesson")}</h1>
 
           {error ? (
             <p className="notice" role="status">

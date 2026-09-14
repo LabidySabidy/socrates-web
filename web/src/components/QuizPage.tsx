@@ -29,6 +29,7 @@ import {
   type QuizState,
 } from "../quiz.ts";
 import { gradingMode } from "../assessment-types.ts";
+import { humanize } from "../humanize.ts";
 
 export function QuizPage({
   courseId,
@@ -227,7 +228,7 @@ export function QuizPage({
           <h1 className="display greeting">No quiz yet</h1>
           <p className="greeting-sub reading">
             This unit has no authored quiz. The tutor can write one for{" "}
-            {unit ? `“${unit.title}”` : "this unit"}, grounded in the concept cards.
+            {unit ? `“${humanize(unit.title)}”` : "this unit"}, grounded in the concept cards.
           </p>
           <div className="quiz-actions">
             <button type="button" className="primary" onClick={() => void generate()} disabled={generating}>
@@ -294,7 +295,7 @@ export function QuizPage({
           {unit ? (
             <>
               <span aria-hidden="true"> › </span>
-              <span aria-current="page">{unit.title}</span>
+              <span aria-current="page">{humanize(unit.title)}</span>
             </>
           ) : null}
         </span>
@@ -310,7 +311,7 @@ export function QuizPage({
 
       <div className="lesson-scroll">
         <div className="quiz">
-          <div className="eyebrow">{unit ? `Unit ${unit.n} · ${unit.title}` : "Quiz"}</div>
+          <div className="eyebrow">{unit ? `Unit ${unit.n} · ${humanize(unit.title)}` : "Quiz"}</div>
           <h1 className="display quiz-prompt">{item?.prompt}</h1>
 
           <div className="quiz-input-row">

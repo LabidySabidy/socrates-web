@@ -2,6 +2,7 @@
 import type { Misconception } from "../types.ts";
 import { SEVERITY_COLOR, SEVERITY_LABEL } from "../severity.ts";
 import { activeCount, trayRows } from "../misconceptions.ts";
+import { humanize } from "../humanize.ts";
 
 function SeverityDot({ state }: { state: keyof typeof SEVERITY_COLOR }) {
   return (
@@ -37,7 +38,7 @@ export function MisconceptionTray({
           <article className="tray-row" key={row.id}>
             <header className="tray-head">
               <span className="tray-id num">{row.id}</span>
-              <span className="tray-concept">{row.concept}</span>
+              <span className="tray-concept">{humanize(row.concept)}</span>
               <SeverityDot state={row.severity} />
             </header>
             {grillHref ? (
@@ -46,7 +47,7 @@ export function MisconceptionTray({
                 href={grillHref(row.concept)}
                 title={`grill this concept`}
               >
-                Grill {row.concept}
+                Grill {humanize(row.concept)}
               </a>
             ) : null}
             <p className="tray-body">{row.misconception}</p>

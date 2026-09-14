@@ -8,6 +8,7 @@ import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { useCourseWatch } from "../watch.ts";
 import { EditableTitle } from "./EditableTitle.tsx";
 import { grillHref, scaffoldHref } from "../grill.ts";
+import { humanize } from "../humanize.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
 import { TelemetryRail } from "./TelemetryRail.tsx";
@@ -164,9 +165,9 @@ export function CoursePage({
           >
             <span className="unit-body">
               <span className="unit-n">Unit {u.n}</span>
-              <div className="unit-title">{u.title}</div>
+              <div className="unit-title">{humanize(u.title)}</div>
             </span>
-            <MasteryRing mastery={u.mastery} size={26} label={`${u.title}: ${u.mastery.state}`} />
+            <MasteryRing mastery={u.mastery} size={26} label={`${humanize(u.title)}: ${u.mastery.state}`} />
           </a>
         ))}
 
@@ -211,7 +212,7 @@ export function CoursePage({
             <>
               <div className="pane-head">
                 <h1 className="display">
-                  Unit {selected.n}: {selected.title}
+                  Unit {selected.n}: {humanize(selected.title)}
                 </h1>
                 <MasteryRing
                   mastery={selected.mastery}
@@ -263,7 +264,7 @@ export function CoursePage({
                         </div>
                         {mod.missing ? (
                           <div className="mod-missing">
-                            references a concept card that does not exist: {mod.concept}
+                            references a concept card that does not exist: {humanize(mod.concept ?? "")}
                           </div>
                         ) : null}
                       </span>

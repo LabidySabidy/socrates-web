@@ -10,6 +10,7 @@ import { fetchJournal } from "../api.ts";
 import type { CourseRef, Journal } from "../types.ts";
 import { hrefCourse } from "../router.ts";
 import { formatDay, mostRecent } from "../select.ts";
+import { humanize } from "../humanize.ts";
 
 export function ContinueStrip({ courses }: { courses: CourseRef[] }) {
   const course = mostRecent(courses);
@@ -49,7 +50,7 @@ export function ContinueStrip({ courses }: { courses: CourseRef[] }) {
           Last session {when}
           {course.sessions.count > 1 ? ` · ${course.sessions.count} sessions` : ""}
           {latest?.open ? " · not closed cleanly" : ""}
-          {concepts.length > 0 ? ` · covered ${concepts.join(", ")}` : ""}
+          {concepts.length > 0 ? ` · covered ${concepts.map(humanize).join(", ")}` : ""}
         </div>
       </span>
       <span className="primary" aria-hidden="true" style={resumeButtonStyle}>

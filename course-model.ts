@@ -21,6 +21,9 @@ import type { Badge, LearningData } from "./learning-parser.ts";
 import { SEVERITIES, severityState, type SeverityState } from "./learning-parser.ts";
 import { validateItems, type AssessmentItem, type Quiz } from "./assessments.ts";
 import { validateSpecs, type Interactive, type Spec } from "./interactives.ts";
+// The humanizer is shared with the client rather than copied — the same precedent as `expr.ts`
+// (interactives.ts imports the evaluator from web/src). One implementation, both renderers.
+import { humanize } from "./web/src/humanize.ts";
 
 // ---------------------------------------------------------------------------
 // Mastery — the five-state union. Six states is never correct.
@@ -217,10 +220,19 @@ function derivedModules(card: {
   const concepts = card.name;
   const mastery = masteryOf(card.badge);
   const base = { concept: concepts, badge: card.badge, mastery };
+  // Module titles are DISPLAY strings assembled here, so the name is humanised where the concatenation
+  // happens — the JSX cannot know which half of the sentence is an identifier. `concept` stays RAW: it is
+  // the grill prompt's argument and the key the tutor matches against its SCHEMA.md headings.
+  const label = humanize(concepts);
   const modules: Module[] = [
-    { id: `${slug(concepts)}/recite`, type: "recite", title: `Recite ${concepts}`, ...base },
-    { id: `${slug(concepts)}/review`, type: "review", title: `Review ${concepts}`, due: card.due, ...base },
-    { id: `${slug(concepts)}/explain`, type: "explain", title: `Explain ${concepts} in your own words`, ...base },
+    { id: `${slug(concepts)}/recite`, type: "recite", title: `Recite ${label}`, ...base },
+    { id: `${slug(concepts)}/review`, type: "review", title: `Review ${label}`, due: card.due, ...base },
+    {
+      id: `${slug(concepts)}/explain`,
+      type: "explain",
+      title: `Explain ${label} in your own words`,
+      ...base,
+    },
   ];
   if (card.misconceptionIds.length > 0) {
     modules.push({
@@ -269,7 +281,9 @@ export function deriveUnits(src: CourseSource, warnings: string[]): Unit[] {
       concepts: [c.name],
       groups: [
         {
-          title: c.name,
+          // Display only (a section heading and a React key), and a different string from `title`
+          // above, which stays raw because it is compared against concept ids in CoursePage.
+          title: humanize(c.name),
           modules: derivedModules({
             name: c.name,
             badge: c.badge,

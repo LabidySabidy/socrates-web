@@ -7,8 +7,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { parseLearning } from "./learning-parser.ts";
 import {
   AUTHORED_MODULE_TYPES,
@@ -27,6 +28,19 @@ import {
 } from "./course-model.ts";
 
 const FIXTURES = join(import.meta.dirname, "test", "fixtures");
+
+/** A course source built from an arbitrary directory, for tests that author their own files. */
+function load2(dir: string): CourseSource {
+  const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const slash = dir.endsWith("/") ? dir : `${dir}/`;
+  return {
+    id: dir.split(/[\/]/).pop() ?? "tmp",
+    dir,
+    data: parseLearning(dir),
+    schemaText: read(`${slash}.agent/learning/SCHEMA.md`),
+    manifestText: read(`${slash}.agent/learning/COURSE.md`),
+  };
+}
 
 function load(name: string): CourseSource {
   const dir = join(FIXTURES, name);
@@ -314,4 +328,77 @@ test("a manifest with no units is invalid rather than silently empty", () => {
 test("slug is stable and safe for ids", () => {
   assert.equal(slug("Alpha One!"), "alpha-one");
   assert.equal(slug("  --weird--  "), "weird");
+});
+
+// ---------------------------------------------------------------------------
+// P17 — display names, never ids
+// ---------------------------------------------------------------------------
+
+test("a legacy slug course derives HUMAN module and group titles, and keeps the raw id", () => {
+  // course-basic's cards are slug names (alpha-one), i.e. a course authored before this change or by
+  // hand. Nothing is migrated: the model humanises what it PRINTS and leaves the identity alone.
+  const course = buildCourse(load("course-basic"));
+  const unit = course.units[0];
+
+  assert.equal(unit.groups[0].title, "Alpha One", "the group heading is human");
+  assert.deepEqual(
+    unit.groups[0].modules.slice(0, 3).map((m) => m.title),
+    ["Recite Alpha One", "Review Alpha One", "Explain Alpha One in your own words"],
+    "the derived titles are display strings, so they are human at the point they are built",
+  );
+
+  // …and the identity is untouched, which is what keeps telemetry, module ids and the grill prompt
+  // working. The grill prompt carries the concept the tutor will match against SCHEMA.md.
+  assert.equal(unit.title, "alpha-one", "the unit's own title stays the raw name");
+  assert.equal(unit.groups[0].modules[0].concept, "alpha-one", "so does the module's concept");
+  assert.equal(unit.groups[0].modules[0].id, "alpha-one/recite", "and the id is still the slug");
+});
+
+test("a course authored with human card names needs no humanising, and its ids are derived", () => {
+  // What the scaffold skill now produces: a human heading, from which the app derives the slug.
+  const dir = mkdtempSync(join(tmpdir(), "soc-human-"));
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(
+    join(dir, ".agent", "learning", "MISSION.md"),
+    "# Wheel Alignment\n",
+  );
+  writeFileSync(
+    join(dir, ".agent", "learning", "SCHEMA.md"),
+    [
+      "# Schema",
+      "",
+      "## Taxonomy",
+      "",
+      "### 🟩 Wheel anatomy and tension model",
+      "",
+      "- **Status:** 🟩 Good",
+      "- **Definition (my own words):** the parts and how they load",
+      "- **SM-2 telemetry:**",
+      "  - `interval`: 3",
+      "  - `ease_factor`: 2.5",
+      "  - `repetitions`: 2",
+      "",
+    ].join("\n"),
+  );
+  const course = buildCourse(load2(dir));
+  const unit = course.units[0];
+
+  assert.equal(unit.title, "Wheel anatomy and tension model", "the heading is the name, verbatim");
+  assert.equal(unit.groups[0].title, "Wheel anatomy and tension model", "and reads unchanged");
+  assert.equal(
+    unit.groups[0].modules[0].title,
+    "Recite Wheel anatomy and tension model",
+    "no double-humanising: the words pass through untouched",
+  );
+  assert.equal(unit.groups[0].modules[0].id, "wheel-anatomy-and-tension-model/recite", "the slug is derived");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("casing the slugger destroyed is not recovered — the documented limitation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "soc-acronym-"));
+  mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
+  writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 kpi-baseline-review\n\n- **Status:** 🟨 Fair\n");
+  const course = buildCourse(load2(dir));
+  assert.equal(course.units[0].groups[0].title, "Kpi Baseline Review", "Kpi, not KPI — nothing here guesses");
+  rmSync(dir, { recursive: true, force: true });
 });
