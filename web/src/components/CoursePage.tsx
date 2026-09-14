@@ -11,6 +11,7 @@ import { grillHref, scaffoldHref } from "../grill.ts";
 import { humanize } from "../humanize.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
 import { ModuleIcon, moduleTypeLabel } from "./ModuleIcon.tsx";
+import { moduleRingLabel } from "../module-types.ts";
 import { TelemetryRail } from "./TelemetryRail.tsx";
 import { JournalPanel } from "./JournalPanel.tsx";
 
@@ -274,7 +275,9 @@ export function CoursePage({
                           mastery={mod.mastery}
                           size={10}
                           stroke={2}
-                          label={`${mod.title}: ${mod.mastery.state}`}
+                          // The visible title dropped its verb, so the accessible name has to carry the
+                          // type instead — see moduleRingLabel.
+                          label={moduleRingLabel(mod.type, mod.title, mod.mastery.state)}
                         />
                       ) : null}
                     </Row>

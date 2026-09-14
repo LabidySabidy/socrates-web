@@ -465,6 +465,13 @@ handshake question should start by reading it.
       someone wrote, returned unchanged. Title-casing every chunk capitalised connectives
       (`Bump Steer And Roll Centre`), the tell of a machine, and it read differently from a fresh
       scaffold in the same library. No connective rules — that is the dictionary trap in another shape.
+      **REVISED AGAIN (follow-up):** back to TITLE CASE, applied to identifiers AND authored text, so a
+      course whose headings predate the convention does not read differently from one scaffolded after it.
+      Word-level, not blunt: a word with an uppercase letter after its first character is deliberate and is
+      left alone (`useState`, `iPhone`, `KPI`, `E46`), everything else is capitalised and lowercased
+      (`kpi` → `Kpi`). No acronym dictionary and no small-word list for connectives — `And` is capitalised
+      like any word, and proper title case is a separate decision if it is ever wanted.
+
       **Two consequences, recorded not papered over:** a SINGLE-WORD slug has no separator and so is
       left exactly as written (`kpi` stays `kpi`), and an authored name containing a hyphen loses it
       (`front-toe` → `Front toe`) — which is why the skill now says to keep hyphens and underscores out
@@ -490,3 +497,12 @@ handshake question should start by reading it.
       English phrase inside authored prose. The journal and continue strip were verified the same way in
       a throwaway store (the owner's sessions record no covered concepts): "Covered Wheel Anatomy And
       Tension Model, E46 Drift Target Spec".
+
+- [x] **T-056** The derived module titles drop the leading verb, because the row already renders the type
+      label beneath them: `Recite X` / `Review X` → `X`, and `Explain X in your own words` keeps its
+      qualifier (it is what distinguishes free recall from a review). `Misconceptions (N)` is untouched.
+      **Done when:** the three titles are asserted, `Misconceptions (N)` is asserted unchanged, no
+      verb-stripped title repeats its own type label, and the three accessible names differ — the visible
+      distinction is the label *beneath*, and a screen reader has no beneath, so `moduleRingLabel` folds
+      the type back in for `aria-label` only.
+      **Done** — 136 server (up from 134) + 98 client (up from 96).

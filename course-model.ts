@@ -223,14 +223,18 @@ function derivedModules(card: {
   // Module titles are DISPLAY strings assembled here, so the name is humanised where the concatenation
   // happens — the JSX cannot know which half of the sentence is an identifier. `concept` stays RAW: it is
   // the grill prompt's argument and the key the tutor matches against its SCHEMA.md headings.
+  //
+  // No leading verb: the row already renders the type label from `module-types.ts` ("Recite", "Review",
+  // "Explain"), so `Recite X` would say it twice. The qualifier stays on the recall exercise, because
+  // "in your own words" is what distinguishes it from a review — that is content, not the type.
   const label = humanize(concepts);
   const modules: Module[] = [
-    { id: `${slug(concepts)}/recite`, type: "recite", title: `Recite ${label}`, ...base },
-    { id: `${slug(concepts)}/review`, type: "review", title: `Review ${label}`, due: card.due, ...base },
+    { id: `${slug(concepts)}/recite`, type: "recite", title: label, ...base },
+    { id: `${slug(concepts)}/review`, type: "review", title: label, due: card.due, ...base },
     {
       id: `${slug(concepts)}/explain`,
       type: "explain",
-      title: `Explain ${label} in your own words`,
+      title: `${label} in your own words`,
       ...base,
     },
   ];

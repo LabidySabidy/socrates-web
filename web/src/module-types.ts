@@ -57,3 +57,15 @@ export const ALL_MODULE_TYPES = Object.keys(MODULE_LABELS) as ModuleType[];
 export function moduleTypeLabel(type: ModuleType): string {
   return MODULE_LABELS[type] ?? type;
 }
+
+/**
+ * The accessible name for a module's mastery ring.
+ *
+ * The visible title deliberately drops the leading verb — the row renders the type label beside it, so
+ * `Recite Recite X` would be a stutter — which means three modules on one unit can carry the SAME title,
+ * differing only in the type shown beneath. A screen reader gets no "beneath", so the type is folded back
+ * in here: the visible title loses the distinction, the ACCESSIBLE name keeps it.
+ */
+export function moduleRingLabel(type: ModuleType, title: string, state: string): string {
+  return `${moduleTypeLabel(type)} — ${title}: ${state}`;
+}

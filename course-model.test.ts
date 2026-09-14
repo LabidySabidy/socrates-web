@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseLearning } from "./learning-parser.ts";
+import { moduleRingLabel, moduleTypeLabel, type ModuleType } from "./web/src/module-types.ts";
 import {
   AUTHORED_MODULE_TYPES,
   MASTERY_BY_BADGE,
@@ -340,10 +341,10 @@ test("a legacy slug course derives HUMAN module and group titles, and keeps the 
   const course = buildCourse(load("course-basic"));
   const unit = course.units[0];
 
-  assert.equal(unit.groups[0].title, "Alpha one", "the group heading is a sentence, not Title Case");
+  assert.equal(unit.groups[0].title, "Alpha One", "the group heading is Title Case");
   assert.deepEqual(
     unit.groups[0].modules.slice(0, 3).map((m) => m.title),
-    ["Recite Alpha one", "Review Alpha one", "Explain Alpha one in your own words"],
+    ["Alpha One", "Alpha One", "Alpha One in your own words"],
     "the derived titles are display strings, so they are human at the point they are built",
   );
 
@@ -384,11 +385,11 @@ test("a course authored with human card names needs no humanising, and its ids a
   const unit = course.units[0];
 
   assert.equal(unit.title, "Wheel anatomy and tension model", "the heading is the name, verbatim");
-  assert.equal(unit.groups[0].title, "Wheel anatomy and tension model", "and reads unchanged");
+  assert.equal(unit.groups[0].title, "Wheel Anatomy And Tension Model", "and reads the same as a slug would");
   assert.equal(
     unit.groups[0].modules[0].title,
-    "Recite Wheel anatomy and tension model",
-    "no double-humanising: the words pass through untouched",
+    "Wheel Anatomy And Tension Model",
+    "the authored heading and the derived slug converge on one string",
   );
   assert.equal(unit.groups[0].modules[0].id, "wheel-anatomy-and-tension-model/recite", "the slug is derived");
   rmSync(dir, { recursive: true, force: true });
@@ -399,6 +400,46 @@ test("casing the slugger destroyed is not recovered — the documented limitatio
   mkdirSync(join(dir, ".agent", "learning"), { recursive: true });
   writeFileSync(join(dir, ".agent", "learning", "SCHEMA.md"), "### 🟨 kpi-baseline-review\n\n- **Status:** 🟨 Fair\n");
   const course = buildCourse(load2(dir));
-  assert.equal(course.units[0].groups[0].title, "Kpi baseline review", "Kpi, not KPI — nothing here guesses");
+  assert.equal(course.units[0].groups[0].title, "Kpi Baseline Review", "Kpi, not KPI — nothing here guesses");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("no derived module title repeats the type label printed beside it", () => {
+  // The row renders `moduleTypeLabel(mod.type)` under the title, so a leading verb would be a stutter.
+  // Checked against the label map itself rather than a hardcoded verb, so this keeps holding if a label
+  // is ever reworded.
+  const course = buildCourse(load("course-basic"));
+  const modules = course.units[0].groups[0].modules;
+  const byType = new Map(modules.map((m) => [m.type, m]));
+
+  assert.equal(byType.get("recite")?.title, "Alpha One");
+  assert.equal(byType.get("review")?.title, "Alpha One");
+  assert.equal(
+    byType.get("explain")?.title,
+    "Alpha One in your own words",
+    "the qualifier stays — it is what distinguishes free recall from a review",
+  );
+  assert.equal(byType.get("misconceptions")?.title, "Misconceptions (2)", "the count module is untouched");
+
+  // Scoped to the three verb-stripped types: `Misconceptions (N)` deliberately repeats its label,
+  // because the count is the content of that row rather than its name.
+  for (const mod of modules.filter((m) => m.type !== "misconceptions")) {
+    const label = moduleTypeLabel(mod.type as ModuleType);
+    assert.ok(
+      !mod.title.toLowerCase().startsWith(label.toLowerCase()),
+      `${mod.type} title "${mod.title}" repeats its own type label "${label}"`,
+    );
+  }
+});
+
+test("two modules share a visible title, so their accessible names must differ", () => {
+  // The reason the ring label folds the type back in: the visible distinction is the label BENEATH the
+  // title, and a screen reader has no beneath.
+  const course = buildCourse(load("course-basic"));
+  const modules = course.units[0].groups[0].modules.filter((m) => m.mastery);
+  const visible = modules.map((m) => m.title);
+  const accessible = modules.map((m) => moduleRingLabel(m.type as ModuleType, m.title, m.mastery!.state));
+
+  assert.ok(new Set(visible).size < visible.length, "the premise: some visible titles repeat");
+  assert.equal(new Set(accessible).size, accessible.length, "…and every accessible name is distinct");
 });

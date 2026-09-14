@@ -26,6 +26,7 @@ import { parseWatchFrame } from "./watch.ts";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { humanize } from "./humanize.ts";
+import { moduleRingLabel } from "./module-types.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
@@ -1209,57 +1210,82 @@ test("a reload frame still works, and anything else is ignored rather than guess
 // humanize: display names, never ids
 // ---------------------------------------------------------------------------
 
-test("a slug becomes a sentence, not Title Case", () => {
-  // Sentence case is the one convention. Title-casing every chunk capitalises connectives, which is
-  // the tell of a machine and reads differently from a newly scaffolded course in the same library.
-  assert.equal(humanize("wheel-anatomy-and-tension-model"), "Wheel anatomy and tension model");
-  assert.equal(humanize("front-toe-spec-reading"), "Front toe spec reading");
-  assert.equal(humanize("bump-steer-and-roll-centre"), "Bump steer and roll centre");
+test("identifier and authored text converge on Title Case", () => {
+  // Both forms must produce the SAME string, because a course whose headings were written before the
+  // convention existed cannot read differently from one scaffolded after it.
+  assert.equal(humanize("wheel-anatomy-and-tension-model"), "Wheel Anatomy And Tension Model");
+  assert.equal(humanize("Wheel anatomy and tension model"), "Wheel Anatomy And Tension Model");
+  assert.equal(humanize("suspension-angle-vocabulary"), "Suspension Angle Vocabulary");
 });
 
-test("snake_case and mixed separators become a sentence", () => {
-  assert.equal(humanize("thrust_angle"), "Thrust angle");
-  assert.equal(humanize("string-method_setup"), "String method setup");
-  // runs of separators collapse rather than producing empty words
-  assert.equal(humanize("a--b__c"), "A b c");
+test("snake_case and mixed separators become words", () => {
+  assert.equal(humanize("thrust_angle"), "Thrust Angle");
+  assert.equal(humanize("string-method_setup"), "String Method Setup");
+  assert.equal(humanize("a--b__c"), "A B C");
 });
 
-test("an identifier with a leading acronym keeps it, and lowercases the rest", () => {
-  // The digits survive the slugger, so the acronym is recoverable here — this is the case that shows
-  // why names should be authored as words without needing a dictionary.
-  assert.equal(humanize("e46-drift-target-spec"), "E46 drift target spec");
+test("a hyphen splits into words and is dropped, on authored text too", () => {
+  assert.equal(humanize("Front-toe"), "Front Toe");
+  assert.equal(humanize("bump-steer-and-roll-centre"), "Bump Steer And Roll Centre");
 });
 
-test("text with no separator is returned UNCHANGED, so authored names are never mangled", () => {
-  // This is the whole safety property: the only signal that a string is an identifier is that it
-  // contains `-` or `_`. Everything else is a name someone wrote, and it passes through as-is.
-  assert.equal(humanize("Camber and toe"), "Camber and toe");
-  assert.equal(humanize("Wheel anatomy and tension model"), "Wheel anatomy and tension model");
-  assert.equal(humanize("Alignment"), "Alignment");
-  assert.equal(humanize("already Title Cased By Hand"), "already Title Cased By Hand");
+test("a word with internal case is deliberate and is left alone", () => {
+  // The whole of the cleverness, and it is a property of the word rather than a list of words: an
+  // uppercase letter after the first character means somebody typed that casing on purpose. This is what
+  // keeps `useState` from becoming `Usestate` and `iPhone` from becoming `IPhone`.
+  assert.equal(humanize("useState"), "useState");
+  assert.equal(humanize("iPhone"), "iPhone");
+  assert.equal(humanize("KPI"), "KPI");
+  assert.equal(humanize("McDonald"), "McDonald");
+  assert.equal(humanize("getUserById"), "getUserById");
+  // …and a lowercase word has no such signal, so it is cased normally.
+  assert.equal(humanize("kpi"), "Kpi");
+  assert.equal(humanize("E46"), "E46");
+  assert.equal(humanize("e46-drift-target-spec"), "E46 Drift Target Spec");
+});
+
+test("connectives are capitalised like any other word — no small-word list", () => {
+  // Proper title case would lowercase "and", "of" and "the". That needs a maintained list, and it is a
+  // separate decision; this function has no such list on purpose.
+  assert.equal(humanize("reading a wheel"), "Reading A Wheel");
+  assert.equal(humanize("tensioning and stress relieving"), "Tensioning And Stress Relieving");
 });
 
 test("applying it twice is applying it once", () => {
-  // Idempotence is what lets the display layer and the source layer coexist without fighting.
   assert.equal(humanize(humanize("wheel-anatomy")), humanize("wheel-anatomy"));
-  assert.equal(humanize(humanize("Camber and toe")), "Camber and toe");
-  assert.equal(humanize(humanize("e46-drift-target-spec")), "E46 drift target spec");
-});
-
-test("an acronym inside an identifier is lowercased unless the identifier has separators", () => {
-  // With separators the first word is capitalised, so `kpi-baseline-review` reads correctly.
-  assert.equal(humanize("kpi-baseline-review"), "Kpi baseline review");
-  // A SINGLE-WORD slug is indistinguishable from a word someone wrote, and the rule is that text with no
-  // separator is returned unchanged — so this stays lowercase. That is the honest cost of the rule, and
-  // the fix is authoring names as words, not a dictionary.
-  assert.equal(humanize("kpi"), "kpi");
-  assert.equal(humanize("sai"), "sai");
+  assert.equal(humanize(humanize("useState")), "useState");
+  assert.equal(humanize(humanize("Camber and toe")), "Camber And Toe");
 });
 
 test("empty input, whitespace and bare separators produce nothing", () => {
   assert.equal(humanize(""), "");
+  assert.equal(humanize("   "), "");
   assert.equal(humanize("-"), "");
   assert.equal(humanize("__"), "");
+});
+
+// ---------------------------------------------------------------------------
+// the module's accessible name keeps the distinction the visible title drops
+// ---------------------------------------------------------------------------
+
+test("the three derived module titles do not repeat their own type", () => {
+  // The row renders the type label beneath the title, so a leading verb in the title says it twice.
+  assert.equal(moduleRingLabel("recite", "Suspension Angle Vocabulary", "Not started"), "Recite — Suspension Angle Vocabulary: Not started");
+  assert.equal(moduleRingLabel("explain", "Suspension Angle Vocabulary in your own words", "Fair"), "Explain — Suspension Angle Vocabulary in your own words: Fair");
+});
+
+test("the three accessible names differ, though two visible titles are identical", () => {
+  // This is the collision the visible change would otherwise create: a screen reader gets no "beneath".
+  const title = "Suspension Angle Vocabulary";
+  const labels = [
+    moduleRingLabel("recite", title, "Not started"),
+    moduleRingLabel("review", title, "Not started"),
+    moduleRingLabel("explain", `${title} in your own words`, "Not started"),
+  ];
+  assert.equal(new Set(labels).size, 3, `labels must be distinct, got ${JSON.stringify(labels)}`);
+  assert.ok(labels[0].startsWith("Recite — "), "the type leads");
+  assert.ok(labels[1].startsWith("Review — "));
+  assert.ok(labels[2].startsWith("Explain — "));
 });
 
 // ---------------------------------------------------------------------------
