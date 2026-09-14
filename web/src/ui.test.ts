@@ -28,6 +28,8 @@ import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
 import { courseErrorView, shouldFollowRename } from "./course-error.ts";
+import { lessonModeOf, moduleAskHref } from "./grill.ts";
+import { sessionMisconceptionLine, stripAbsolutePaths } from "./session-note.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
   actionLabel,
@@ -1457,4 +1459,85 @@ test("the follow rule is the only thing deciding a rename navigation", () => {
     shouldFollowRename({ from: "a", to: "b", courseId: "a", busy: true, alreadyFollowed: null }),
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Step 2 — dispatch lifecycle: repeat clicks fire, refreshes keep intent
+// ---------------------------------------------------------------------------
+
+test("a module row carries the intent, not just the destination", () => {
+  // A Recite or Explain row used to open the lesson with NOTHING dispatched, so the tutor sat silent until
+  // the learner typed. The grill row already did this correctly.
+  const recite = moduleAskHref("c", 3, "recite", "suspension-angle-vocabulary");
+  const explain = moduleAskHref("c", 3, "explain", "suspension-angle-vocabulary");
+  assert.ok(recite && recite.includes("ask="), "recite dispatches");
+  assert.ok(explain && explain.includes("ask="), "explain dispatches");
+  assert.ok(recite!.includes("/lesson/c/3"), "and still lands on the right unit");
+  // the prompt carries a skill the tutor can actually load (see T-058) and the concept's display name
+  assert.ok(decodeURIComponent(recite!).includes("/skill:grill-misconception"), "a served skill");
+  assert.ok(decodeURIComponent(recite!).includes("Suspension Angle Vocabulary"), "the human name");
+  // types with no dispatch contract keep the plain destination
+  assert.equal(moduleAskHref("c", 3, "article", "x"), null);
+});
+
+test("the dispatch key distinguishes a repeat click from a re-render", () => {
+  // The bug: `dispatched.current === ask` was never reset, so a second click on the same module was a
+  // silent no-op. The generation is what makes the second arrival new.
+  const key = (ask: string, arrival: number) => `${ask}#${arrival}`;
+  assert.equal(key("grill X", 1), key("grill X", 1), "one arrival, one key — no double fire");
+  assert.notEqual(key("grill X", 1), key("grill X", 2), "a second click is a new arrival");
+});
+
+test("the ask stays in the URL so a refresh keeps the intent", () => {
+  // `replaceState` used to strip `?ask=` immediately, which lost it for a refresh and the back button.
+  const href = moduleAskHref("c", 3, "recite", "tension");
+  assert.ok(href!.includes("?ask="), "the intent is in the URL the learner can reload");
+});
+
+// ---------------------------------------------------------------------------
+// Step 3c/6b — session records, and not leaking the machine
+// ---------------------------------------------------------------------------
+
+test("a session's misconception is shown with its own tense and the present one", () => {
+  const row = {
+    id: "MIS-001",
+    concept: "tension",
+    summary: "spokes carry load in compression",
+    occurred: "open" as const,
+    currentState: "resolved",
+    sinceResolved: true,
+  };
+  const line = sessionMisconceptionLine(row);
+  assert.equal(line.sinceResolved, true);
+  assert.match(line.text, /^Open: /, "what the record said at the time");
+  assert.match(line.text, /since resolved/, "and where it stands now");
+});
+
+test("a still-open belief says so rather than reading as fixed", () => {
+  const line = sessionMisconceptionLine({
+    id: "MIS-002",
+    concept: "tension",
+    summary: "s",
+    occurred: "open",
+    currentState: "open",
+    sinceResolved: false,
+  });
+  assert.match(line.text, /still open/);
+  assert.equal(line.sinceResolved, false);
+});
+
+test("absolute paths are neutralised in anything shown", () => {
+  // GL-019: a session record carries the machine's paths, which leak the OS username.
+  const shown = stripAbsolutePaths(
+    "Transcript: C:\\Users\\Kasim Alam\\.socrates\\pi\\sessions\\--x--\\abc.jsonl and /home/kasim/x",
+  );
+  assert.ok(!shown.includes("Kasim"), `username leaked: ${shown}`);
+  assert.ok(!shown.includes("C:\\"), "no drive path");
+  assert.ok(!shown.includes("/home/"), "no POSIX home path");
+  assert.ok(shown.includes("(this course)"), "and it still says something useful");
+});
+
+test("stripping paths leaves ordinary prose alone", () => {
+  const prose = "You corrected the misconception about spoke tension — nice work.";
+  assert.equal(stripAbsolutePaths(prose), prose);
 });

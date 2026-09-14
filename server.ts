@@ -28,6 +28,7 @@ import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { parseHistory } from "./history.ts";
+import { buildContinuity, lessonMode } from "./continuity.ts";
 import {
   courseRefs,
   courseDir,
@@ -806,6 +807,31 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
       res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
       res.end(markdown);
+      return;
+    }
+
+    /**
+     * Cross-session continuity for a course: every concept's standing NOW, and the session history
+     * reconciled against it.
+     *
+     * One payload because the two cannot be read apart: a session record that says a misconception was
+     * live is only meaningful next to the registry that says whether it still is.
+     */
+    const continuityMatch = /^\/api\/courses\/([^/]+)\/continuity$/.exec(url);
+    if (continuityMatch && req.method === "GET") {
+      const ref = findCourse(discover(), decodeURIComponent(continuityMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${continuityMatch[1]}` });
+        return;
+      }
+      try {
+        const learning = parseLearning(ref.dir);
+        const registry = new Map(learning.schema.misconceptions.map((m) => [m.id, m]));
+        const view = buildContinuity(learning, readJournal(ref.dir).sessions, registry);
+        sendJson(res, 200, { ...view, mode: lessonMode({ asked: false, standing: null, hasHistory: view.sessions.length > 0 }) });
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
 

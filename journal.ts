@@ -21,6 +21,20 @@ export interface SessionSummary {
   open: boolean;
   turns: number | null;
   concepts: string[];
+  /**
+   * Misconception rows AS THE RECORD WROTE THEM, with the state they claimed at the time.
+   *
+   * The count alone cannot answer "was this later resolved?", which is the question a learner opening an
+   * old session actually has. The status in the record is the past tense; `continuity.ts` resolves it
+   * against the registry's present tense.
+   */
+  misconceptionRows: {
+    id: string;
+    concept: string;
+    /** The status the record claimed: `open` or `resolved`. */
+    claimed: "open" | "resolved";
+    summary: string;
+  }[];
   misconceptions: number;
   gaps: number;
   transcript: string | null;
@@ -122,6 +136,19 @@ export function parseSessionMarkdown(file: string, body: string, bytes: number):
     return out;
   };
 
+  // "## Misconceptions" -> "- `MIS-001` (open) concept: summary…"
+  // Ids and the claimed state are kept, not just counted: answering "was this later resolved?" needs
+  // them, and the count alone cannot.
+  const misconceptionRows = section("Misconceptions")
+    .map((line) => /`([^`]+)`\s*\((open|resolved)\)\s*([^:]*):\s*(.*)$/.exec(line.trim()))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({
+      id: m[1],
+      concept: m[3].trim(),
+      claimed: m[2] as "open" | "resolved",
+      summary: m[4].trim(),
+    }));
+
   // "## Concepts touched" -> "- 🟨 **react-state** — next review in 2d"
   const concepts = section("Concepts touched")
     .map((l) => /\*\*(.+?)\*\*/.exec(l)?.[1])
@@ -136,7 +163,8 @@ export function parseSessionMarkdown(file: string, body: string, bytes: number):
     open: status !== "closed",
     turns: turnsRaw && Number.isFinite(Number(turnsRaw)) ? Number(turnsRaw) : null,
     concepts,
-    misconceptions: section("Misconceptions").length,
+    misconceptionRows,
+    misconceptions: misconceptionRows.length,
     gaps,
     transcript,
     bytes,

@@ -216,3 +216,30 @@ export interface HistoryResponse {
  * renders a live settled turn, which is what keeps the two paths indistinguishable.
  */
 export const fetchHistory = (id: string) => get<HistoryResponse>(`/api/courses/${encodeURIComponent(id)}/history`);
+
+export interface ConceptStanding {
+  concept: string;
+  mastery: string;
+  isNew: boolean;
+  touched: boolean;
+  openMisconceptions: string[];
+  resolvedMisconceptions: string[];
+}
+
+export interface ContinuityResponse {
+  concepts: ConceptStanding[];
+  sessions: {
+    file: string;
+    startedAt: string | null;
+    open: boolean;
+    turns: number | null;
+    concepts: string[];
+    misconceptions: { id: string; concept: string; summary: string; occurred: "open" | "resolved"; currentState: string; sinceResolved: boolean }[];
+  }[];
+  workedOn: string[];
+  mode: string;
+}
+
+/** Progress, badge state and resolved misconceptions carried across sittings. */
+export const fetchContinuity = (id: string) =>
+  get<ContinuityResponse>(`/api/courses/${encodeURIComponent(id)}/continuity`);

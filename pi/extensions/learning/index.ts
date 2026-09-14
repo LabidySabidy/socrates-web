@@ -25,7 +25,7 @@ import {
   type LearningEvent,
 } from "./events.ts";
 import { projectSchema } from "./schema.ts";
-import { detectGrillTurn, countUserPrompts } from "./signal.ts";
+import { countUserPrompts, detectRecordableGrillTurn, lastAssistantMessageText } from "./signal.ts";
 import { renderSessionMarkdown, sessionFileName, staleSessions } from "./sessions.ts";
 import {
   appendEvent,
@@ -244,7 +244,11 @@ export default function learning(pi: ExtensionAPI) {
   pi.on("agent_end", async (_event: unknown, ctx: Ctx) => {
     if (!session) return;
     if (!telemetryThisTurn && isCourseDir(ctx.cwd)) {
-      const signal = detectGrillTurn(ctx.sessionManager.getEntries());
+      // T-057: only a grill that REACHED A VERDICT owes telemetry. A still-probing turn asked questions
+      // and changed nothing, so its silence is correct — recording a gap there made the signal useless
+      // for telling a broken pipeline from an unchanged one.
+      const entries = ctx.sessionManager.getEntries();
+      const signal = detectRecordableGrillTurn(entries, lastAssistantMessageText(entries));
       if (signal.active) {
         appendEvent(ctx.cwd, {
           v: EVENT_VERSION,

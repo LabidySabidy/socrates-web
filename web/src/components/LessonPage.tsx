@@ -9,11 +9,19 @@
  * module pane's scroll position.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchCourse, fetchHistory, fetchSessionStatus, type SessionStatus } from "../api.ts";
+import {
+  fetchContinuity,
+  fetchCourse,
+  fetchHistory,
+  fetchSessionStatus,
+  type ContinuityResponse,
+  type SessionStatus,
+} from "../api.ts";
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
 import { courseErrorView, shouldFollowRename } from "../course-error.ts";
 import { useCourseWatch } from "../watch.ts";
+import { lessonModeOf, openingPrompt } from "../grill.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { humanize } from "../humanize.ts";
@@ -45,6 +53,7 @@ export function LessonPage({
   courseId,
   unitNumber,
   ask,
+  arrival,
   budapest = false,
   onExit,
 }: {
@@ -52,6 +61,11 @@ export function LessonPage({
   unitNumber: number;
   /** A prompt to dispatch on arrival — how a tray or rail click starts a grill. */
   ask?: string | null;
+  /**
+   * A counter that changes on every navigation to this lesson, so a repeat click on the same module is
+   * a new arrival rather than an ignored re-render.
+   */
+  arrival: number;
   /** Budapest mode: the SERVER injects the modifier, so the message stays unpolluted. */
   budapest?: boolean;
   onExit: () => void;
@@ -66,6 +80,8 @@ export function LessonPage({
    * rather than offering a box that silently does nothing.
    */
   const [tutor, setTutor] = useState<SessionStatus | null>(null);
+  /** 3a — progress, badges and resolved misconceptions carried across sittings. */
+  const [continuity, setContinuity] = useState<ContinuityResponse | null>(null);
   /** The sprint gate: 300 seconds of frozen composer, no backend state. */
   const [gateOpen, setGateOpen] = useState(false);
   const [remaining, setRemaining] = useState(REST_SECONDS);
@@ -82,8 +98,14 @@ export function LessonPage({
 
   const streamRef = useRef<EventSource | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  /** A dispatched grill fires exactly once, however many times the component re-renders. */
+  /** A dispatched prompt fires exactly once per arrival, however many times the component re-renders. */
   const dispatched = useRef<string | null>(null);
+  /**
+   * Which arrival this is. Bumped by the router on every navigation (App keys the page on the route
+   * sequence), so the SAME `?ask=` clicked twice is two arrivals and re-fires, while one arrival that
+   * re-renders is one key.
+   */
+  const askGeneration = arrival;
   /**
    * B4 — the error must not survive a navigation. A stale id left "unknown course: …" on screen even
    * after the learner moved to the correct lesson, so the message outlived the problem it described.
@@ -121,6 +143,52 @@ export function LessonPage({
   }, [busy]);
   const followedRename = useRef<string | null>(null);
 
+  /**
+   * 2a — the tutor opens the lesson.
+   *
+   * No lesson could start itself, so learners typed "hey, are you there?" into an empty console. Once the
+   * unit's state is known (continuity + restored history), if the learner arrived with no intent of their
+   * own and nothing settled on screen, the tutor speaks first. The route is decided by `lessonMode` from
+   * the learner's real state, not by the model.
+   */
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continuity || !tree) return;
+    if (ask) return; // the learner arrived with intent; the dispatch effect owns it
+    if (history.length > 0) return; // something is already settled on screen
+    if (busy) return;
+    const key = `${courseId}#${unitNumber}#${continuity.sessions.length}`;
+    if (openedFor.current === key) return;
+    openedFor.current = key;
+
+    const concept = unit?.title ?? null;
+    const standing = concept
+      ? continuity.concepts.find((c) => c.concept === concept) ?? null
+      : null;
+    const priorSessions = concept
+      ? continuity.sessions.filter((s) => s.concepts.includes(concept)).length
+      : 0;
+    const miscon = concept
+      ? continuity.sessions
+          .flatMap((s) => s.misconceptions)
+          .filter((m) => m.concept === concept)
+          .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i)
+          .map((m) => ({ id: m.id, summary: m.summary, sinceResolved: m.sinceResolved }))
+      : [];
+
+    const mode = lessonModeOf(standing, priorSessions > 0);
+    void send(
+      openingPrompt({
+        concept,
+        mode,
+        priorSessions,
+        mastery: standing?.mastery ?? null,
+        misconceptions: miscon,
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when the unit's state is known
+  }, [continuity, tree, ask, history.length, busy, courseId, unitNumber]);
+
   useEffect(() => {
     let alive = true;
     setTree(null);
@@ -129,11 +197,16 @@ export function LessonPage({
     // back; a turn cut off mid-stream was dropped server-side rather than marked, because a half-turn
     // rendered like a finished reply cannot be told from one.
     setHistory([]);
-    Promise.all([fetchCourse(courseId), fetchHistory(courseId).catch(() => ({ turns: [], session: null, truncated: false }))])
-      .then(([t, h]) => {
+    Promise.all([
+      fetchCourse(courseId),
+      fetchHistory(courseId).catch(() => ({ turns: [], session: null, truncated: false })),
+      fetchContinuity(courseId).catch(() => null),
+    ])
+      .then(([t, h, c]) => {
         if (!alive) return;
         setTree(t);
         setHistory(h.turns);
+        setContinuity(c);
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));
@@ -213,18 +286,34 @@ export function LessonPage({
     return () => clearInterval(id);
   }, [gateOpen]);
 
-  // Dispatch an arriving prompt once: seed the composer so the learner can SEE what is being asked on
-  // their behalf, then send it. The param is stripped from the URL so a reload cannot re-fire it.
+  /**
+   * Dispatch an arriving prompt: seed the composer so the learner can SEE what is being asked on their
+   * behalf, then send it.
+   *
+   * TWO BUGS THIS REPLACES, both reproduced:
+   *
+   * 1. `replaceState` stripped `?ask=` immediately, so a refresh or the back button lost the intent
+   *    entirely — the URL no longer said what the learner had clicked.
+   * 2. `dispatched.current === ask` was never reset, so clicking the same module a second time was a
+   *    silent no-op: the guard meant to stop double-firing also stopped re-firing.
+   *
+   * The fix separates "has this been dispatched in THIS visit" from "is a dispatch pending at all". A
+   * key is `<ask>#<generation>`, and the generation bumps whenever the route's ask changes or the learner
+   * arrives fresh — so a repeat click (a new navigation event with the same text) is a new key and
+   * re-fires, while a re-render of the same visit is not. The async work is guarded by the same key, so
+   * React's development double-invoke and a fast re-render cannot send twice.
+   */
+  const dispatchKey = ask ? `${ask}#${askGeneration}` : null;
   useEffect(() => {
-    if (!ask || dispatched.current === ask) return;
-    dispatched.current = ask;
+    if (!ask || !dispatchKey || dispatched.current === dispatchKey) return;
+    dispatched.current = dispatchKey;
     setInput(ask);
-    // Strip the ask but STAY on the lesson: replaceState does not re-route, so writing the course
-    // route here left the URL describing a different screen than the one on display.
-    window.history.replaceState(null, "", hrefLesson(courseId, unitNumber));
+    // The ask is NOT stripped from the URL: it is the only record of what the learner clicked, and a
+    // refresh has to be able to re-derive it. It is harmless to leave because `dispatched.current` stops
+    // a re-fire within the same visit.
     void send(ask);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the ask value only
-  }, [ask, courseId, unitNumber]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the dispatch key only
+  }, [dispatchKey]);
 
   function exit() {
     gateSeen.current = false;

@@ -7,7 +7,7 @@ import { hrefCourse, hrefHome, hrefLab, hrefLesson, hrefQuiz } from "../router.t
 import { courseScrollKey, readPaneScroll, savePaneScroll } from "../scroll.ts";
 import { useCourseWatch } from "../watch.ts";
 import { EditableTitle } from "./EditableTitle.tsx";
-import { grillHref, scaffoldHref } from "../grill.ts";
+import { grillHref, moduleAskHref, scaffoldHref } from "../grill.ts";
 import { humanize } from "../humanize.ts";
 import { courseErrorView } from "../course-error.ts";
 import { MasteryLegend, MasteryRing } from "./MasteryRing.tsx";
@@ -258,7 +258,12 @@ export function CoursePage({
                         ? { href: hrefQuiz(courseId, selected.n) }
                         : opensLesson && selected
                         ? {
-                            href: hrefLesson(courseId, selected.n),
+                            // Carry the INTENT, not just the destination: a Recite or Explain row used
+                            // to open the lesson with nothing dispatched, so the tutor sat silent until
+                            // the learner typed. The grill row already did this.
+                            href:
+                              moduleAskHref(courseId, selected.n, mod.type, mod.concept ?? "") ??
+                              hrefLesson(courseId, selected.n),
                             // Save on the way OUT of the course page: by the time the lesson
                             // renders, this pane is gone and its scroll offset is unrecoverable.
                             onClick: () =>

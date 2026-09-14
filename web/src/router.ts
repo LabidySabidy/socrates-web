@@ -77,16 +77,37 @@ export function hrefLesson(courseId: string, unit: number): string {
   return `#/lesson/${encodeURIComponent(courseId)}/${unit}`;
 }
 
+export interface Navigation {
+  route: Route;
+  /**
+   * Increments on every `hashchange`.
+   *
+   * A page needs to tell "this arrival" from "this component re-rendering", and the route object cannot
+   * say: clicking the same module twice produces two `hashchange` events with an IDENTICAL route. The
+   * counter is what makes the second click a new arrival — which is the difference between re-dispatching
+   * a prompt and silently ignoring it.
+   */
+  sequence: number;
+}
+
 export function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
+  return useNavigation().route;
+}
+
+export function useNavigation(): Navigation {
+  const [nav, setNav] = useState<Navigation>(() => ({
+    route: parseHash(window.location.hash),
+    sequence: 0,
+  }));
 
   useEffect(() => {
-    const onChange = () => setRoute(parseHash(window.location.hash));
+    const onChange = () =>
+      setNav((prev) => ({ route: parseHash(window.location.hash), sequence: prev.sequence + 1 }));
     window.addEventListener("hashchange", onChange);
     // normalise an empty hash so the URL is always shareable
     if (!window.location.hash) window.location.replace(hrefHome());
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
 
-  return route;
+  return nav;
 }
