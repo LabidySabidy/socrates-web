@@ -171,6 +171,54 @@ export function parseSessionMarkdown(file: string, body: string, bytes: number):
   };
 }
 
+
+/**
+ * Collapse session records that recorded the SAME thing.
+ *
+ * THE PROBLEM (report #3, `2026-09-15T05-11-37-371Z-27985e37`): "session repeat and show the same thing
+ * repeatedly, has no value right now". Each pi session writes its own `SESSIONS/*.md` snapshot of CUMULATIVE
+ * state, so N runs in one unit produce N rows carrying identical information. Measured on the owner's real
+ * course: 16 files, all recording the same unit, the same two misconceptions and the same "next review in 0d"
+ * — 16 unique content hashes but semantically one record, which is why a byte-comparison would not have caught
+ * it.
+ *
+ * SILENT BY DECISION. The owner asked for the repeats to collapse "silently", so no count is exposed: a number
+ * the learner can do nothing with is noise, and the row they keep is the newest and therefore the true one.
+ *
+ * Only ADJACENT duplicates collapse. Sessions are sorted newest-first, so a run of identical records is one
+ * stretch of time in one unit; if the learner moved to another concept and came back, the rows differ and both
+ * are kept — which is the honest reading of their history.
+ */
+export function collapseRepeats(sessions: SessionSummary[]): SessionSummary[] {
+  const out: SessionSummary[] = [];
+  for (const s of sessions) {
+    const prev = out[out.length - 1];
+    if (prev && sameRecord(prev, s)) continue;
+    out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Did two sessions record the same thing?
+ *
+ * Compares what a learner would read: the concepts covered and the misconception rows. Deliberately NOT the
+ * file name, timestamp or byte count — those always differ, which is exactly why the 16 duplicates looked like
+ * 16 distinct entries to every check that came before this one.
+ */
+function sameRecord(a: SessionSummary, b: SessionSummary): boolean {
+  if (a.concepts.length !== b.concepts.length) return false;
+  for (let i = 0; i < a.concepts.length; i++) if (a.concepts[i] !== b.concepts[i]) return false;
+
+  if (a.misconceptionRows.length !== b.misconceptionRows.length) return false;
+  for (let i = 0; i < a.misconceptionRows.length; i++) {
+    const x = a.misconceptionRows[i];
+    const y = b.misconceptionRows[i];
+    if (x.id !== y.id || x.claimed !== y.claimed || x.summary !== y.summary) return false;
+  }
+  return true;
+}
+
 export function readJournal(courseDir: string, opts: { limit?: number } = {}): Journal {
   const warnings: string[] = [];
   const dir = sessionsDir(courseDir);
@@ -197,6 +245,9 @@ export function readJournal(courseDir: string, opts: { limit?: number } = {}): J
 
   // newest first — the filename carries a UTC timestamp, so lexical sort is chronological
   sessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  // After the sort, so adjacency means consecutive in time. Before the limit, so a page of 20 does not become
+  // three rows by accident.
+  const collapsed = collapseRepeats(sessions);
 
   const eventsPath = join(courseDir, ".agent", "learning", "events.jsonl");
   const events = {
@@ -231,7 +282,7 @@ export function readJournal(courseDir: string, opts: { limit?: number } = {}): J
   }
 
   const limit = opts.limit ?? 50;
-  return { sessions: sessions.slice(0, limit), events, warnings };
+  return { sessions: collapsed.slice(0, limit), events, warnings };
 }
 
 /** One session's markdown, or null when the name is not a session file / does not exist. */export function readSessionMarkdown(courseDir: string, file: string): string | null {

@@ -22,6 +22,20 @@
 export interface HistoryTurn {
   role: "user" | "assistant";
   text: string;
+  /**
+   * The tutor's reasoning for this turn, when the record has it.
+   *
+   * D6 (report #6, `2026-09-15T05-07-15-660Z-539bec85`): the owner clicked into a lesson, then out, then back,
+   * and the Socratic Reasoning drawer said nothing was recorded. Live turns showed reasoning and restored ones
+   * did not, because this reader kept only `text` parts. Absent means the record genuinely had none — never
+   * an empty string, so the drawer can tell "no reasoning" from "reasoning that was empty".
+   */
+  thinking?: string;
+  /**
+   * Set when the APP opened this turn (a skill dispatch), so the UI shows it as the tutor's opening rather
+   * than as the learner's own words (D13/D14, and the C2 defect it must not reintroduce).
+   */
+  origin?: "app";
 }
 
 /** The slice of a pi session entry this module reads. Everything else is ignored. */
@@ -42,6 +56,17 @@ function assistantText(content: unknown): string {
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text as string)
     .join("")
+    .trim();
+}
+
+/** The assistant's reasoning: every `thinking` part, in order. Separate from prose by design. */
+function assistantThinking(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part): part is { type?: string; thinking?: string } => typeof part === "object" && part !== null)
+    .filter((part) => part.type === "thinking" && typeof part.thinking === "string")
+    .map((part) => part.thinking as string)
+    .join(String.fromCharCode(10))
     .trim();
 }
 
@@ -80,6 +105,11 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
   const turns: HistoryTurn[] = [];
   let pending: string | null = null;
   let lastAssistant = "";
+  // The reasoning that accompanies `lastAssistant`. Tracked beside the prose, not inside it, so the drawer can
+  // show the tutor's working without it appearing in the conversation.
+  let lastThinking = "";
+  /** The pending turn was opened by the APP (a skill dispatch), not typed by the learner (D13/D14). */
+  let appOpened = false;
 
   const flush = () => {
     if (pending === null) return;
@@ -90,11 +120,18 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
     // real reply is indistinguishable from one to the learner. The tutor re-opens the unit on the next
     // load, so nothing is lost by leaving it out.
     if (text) {
-      turns.push({ role: "user", text: pending });
-      turns.push({ role: "assistant", text });
+      // The learner's own words, or a marker that the app opened this turn. A dispatch is NEVER rendered as
+      // speech — it carries a slash command and scripted first-person text they did not write (C2) — but the
+      // turn itself is real, and dropping it lost the tutor's opening explanation.
+      turns.push(appOpened ? { role: "user", text: "", origin: "app" } : { role: "user", text: pending });
+      // `thinking` is OMITTED when the record had none, rather than set to "", so the drawer can distinguish
+      // "no reasoning recorded" from "reasoning that was empty".
+      turns.push({ role: "assistant", text, ...(lastThinking.trim() ? { thinking: lastThinking.trim() } : {}) });
     }
     pending = null;
     lastAssistant = "";
+    lastThinking = "";
+    appOpened = false;
   };
 
   for (const line of jsonl.split("\n")) {
@@ -112,13 +149,36 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
     if (role === "user") {
       flush();
       const text = userText(entry.message.content);
-      if (text && !isSkillDispatch(text)) pending = text;
-      else pending = null;
+      if (text && !isSkillDispatch(text)) {
+        pending = text;
+      } else if (text && isSkillDispatch(text)) {
+        // D13/D14 — A TURN THE APP OPENED STILL COUNTS.
+        //
+        // The first user message in a tutor-opened lesson IS the skill dispatch. Setting `pending = null` for
+        // it dropped the tutor's entire opening explanation, because `flush` needs a pending user turn to
+        // settle the reply into. Measured on the real course: the session's only user message is
+        // `<skill name="grill-misconception" …>` followed by a real reply, and this returned ZERO turns —
+        // reports #13 (`…d7dfdcd2`) "doesnt include the lessons before the question" and #14 (`…e9c8d721`)
+        // "doesnt guaruntee the previous explainer teachings are re-displayed".
+        //
+        // The dispatch's own TEXT is still never shown (the C2 defect must not return); it is marked as
+        // app-authored so the UI renders it as the tutor's opening rather than as the learner's words.
+        pending = text;
+        appOpened = true;
+      } else {
+        pending = null;
+        appOpened = false;
+      }
       continue;
     }
     if (role === "assistant") {
       const text = assistantText(entry.message.content);
-      if (text) lastAssistant = text;
+      if (text) {
+        lastAssistant = text;
+        // Paired with the prose it belongs to: an assistant entry that produced text is the one whose
+        // reasoning the learner was watching.
+        lastThinking = assistantThinking(entry.message.content);
+      }
       continue;
     }
     // toolResult entries carry no prose; the assistant entry after them does.

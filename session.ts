@@ -122,22 +122,72 @@ export interface Session {
  * tool snippets and guidelines extensions opt into, and dropping it would take away the tutor's ability
  * to write the course files.
  */
+/**
+ * The learner's locale, fixed rather than configured.
+ *
+ * Owner's decision, 2026-09-15: "always assume the USA. Assume I live in Texas … This is not a per learner
+ * setting. We can change that down the line if this turns into something, but for now we need to just keep
+ * things simple." Recorded in DECISIONS.md with that reversal path.
+ */
+export const LOCALE_INSTRUCTION =
+  "The learner is in the United States (Texas). Use US English spelling and US conventions. " +
+  "Do not use UK trade slang or assume British terminology: words like \"sparky\", \"ceiling rose\", " +
+  "\"consumer unit\" and \"earth\" are UK usage — use the terms this learner would hear instead " +
+  "(electrician, ceiling fixture, breaker panel, ground), and if a term is genuinely unavoidable, define it " +
+  "in the same sentence.";
+
+/**
+ * Every skill shipped in the app's pi home.
+ *
+ * Scanned, not listed, so adding a file cannot leave it unserved — the failure mode T-058 records. An absent
+ * or unreadable directory returns an empty list rather than throwing: a session with no skills starts and the
+ * lesson says so, which beats refusing to boot.
+ */
+export function shippedSkills(home: string): string[] {
+  try {
+    return readdirSync(join(home, "skills"))
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .map((f) => join(home, "skills", f));
+  } catch {
+    return [];
+  }
+}
+
 export function composeSession(env: NodeJS.ProcessEnv = process.env): Session {
   const home = appPiHome(env);
   const shipped = shippedAssets();
   const provider = resolveProvider(env, home);
   // The paths pi will actually read: the app's HOME, not the repo. `ensureHome` puts the shipped assets
   // there; checking the repo instead would pass a preflight for a session that cannot start.
+  // SERVE EVERY SHIPPED SKILL, by scanning rather than listing.
+  //
+  // The list used to be hand-maintained, and that is a silent failure with a known precedent: T-058 records a
+  // skill that "is served in NO configuration" while the app dispatched it, producing a lesson whose tutor had
+  // no instructions for the task. Adding `skill-explain-concept.md` for D9 would have repeated it. A directory
+  // read cannot go stale.
   const assets = {
     home,
     extensions: [join(home, "extensions", "learning"), join(home, "extensions", "passivity")],
-    skills: [join(home, "skills", "skill-scaffold-learning.md"), join(home, "skills", "skill-grill-misconception.md")],
+    skills: shippedSkills(home),
     templates: join(home, "templates", "learning"),
     auth: join(home, "auth.json"),
   };
 
   const args = ["--mode", "rpc", "--no-context-files"];
   if (provider.provider && provider.model) args.push("--model", `${provider.provider}/${provider.model}`);
+  // D8 + D15 — the learner's locale, stated rather than guessed.
+  //
+  // Reports #8 (`…509aae37`, "what is a sparky? … is this UK talk?") and #15 (`…04282f90`, "thinks I'm in the
+  // UK but I'm in the USA"). The model defaulted to its training prior — UK English, UK trade terms — because
+  // nothing in the shipped prompts mentioned a locale at all. APPENDED, never `--system-prompt`: replacing the
+  // system prompt would drop the tool snippets and guidelines the extensions opt into, which `composeSession`'s
+  // header already warns about.
+  //
+  // A CONSTANT by the owner's decision ("this is not a per learner setting … keep things simple"). Two
+  // sessions in the same environment therefore instruct the tutor identically, which is what makes the
+  // behaviour reproducible.
+  args.push("--append-system-prompt", LOCALE_INSTRUCTION);
 
   return {
     env: { ...env, PI_CODING_AGENT_DIR: home },
@@ -216,8 +266,20 @@ export function preflight(env: NodeJS.ProcessEnv = process.env): PreflightResult
   for (const ext of p.extensions) {
     if (!existsSync(join(ext, "index.ts"))) problems.push(`shipped extension missing: ${ext}/index.ts`);
   }
-  for (const skill of p.skills) {
-    if (!existsSync(skill)) problems.push(`shipped skill missing: ${skill}`);
+  // Checked against the REPO's shipped skills, not the home's.
+  //
+  // `p.skills` is now a SCAN of the app home, so before `ensureHome` runs it is empty and this loop would
+  // report nothing — silently passing a session with no skills at all. The preflight's whole job is to name
+  // what is missing before a spawn, so it must read the source of truth.
+  const shippedSkillsDir = join(shippedAssets(), "skills");
+  try {
+    const found = readdirSync(shippedSkillsDir).filter((f) => f.endsWith(".md"));
+    if (found.length === 0) problems.push(`no skills shipped at ${shippedSkillsDir}`);
+    for (const f of found) {
+      if (!existsSync(join(p.home, "skills", f))) problems.push(`shipped skill missing: ${join(p.home, "skills", f)}`);
+    }
+  } catch {
+    problems.push(`skills directory unreadable: ${shippedSkillsDir}`);
   }
   if (!existsSync(p.templates)) problems.push(`learning templates missing: ${p.templates}`);
   if (!existsSync(p.auth)) {

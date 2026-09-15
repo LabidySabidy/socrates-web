@@ -42,14 +42,21 @@ Never assume the subject is software: no code puzzles for a non-code concept, no
 non-mechanical one.
 
 ## Telemetry
-When — and only when — a concept's proficiency changes, or a misconception is detected or resolved, append
-exactly one JSON block in `<learning-telemetry>` tags. Emit nothing else inside the tags. If nothing
-changed, emit no block at all.
+When — and only when — a concept's proficiency changes, or a misconception is detected or resolved, call the
+`record_learning` tool exactly once. **Do not write the telemetry into your reply.** The learner reads your
+prose, and a JSON block in the middle of it is back-end bookkeeping leaking onto their screen.
+
+Use the tool. The `<learning-telemetry>` tag form below is a FALLBACK for a runtime where the tool is
+unavailable — and even then it must be the last thing in the message, never interleaved with prose.
 
 - `status` is one bare emoji: 🟥 🟨 🟩 🟦. No text label beside it.
 - `sm2`: `ease_factor` starts at 2.5; `interval` is days until the next review (1 after a first success);
   `repetitions` counts consecutive successes and resets on a failure.
 - `misconception` is optional — omit the key when none was opened or resolved this turn.
+
+**A misconception is worth naming to the learner.** When you open one, the app renders its own notice quoting
+your `description`, so write that description as a clear statement of what they believed, in their words — it
+is shown back to them.
 
 <learning-telemetry>
 {

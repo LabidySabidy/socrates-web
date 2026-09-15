@@ -21,11 +21,25 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-/** The document a frame is given. Inline styles only — a frame inherits nothing from the app. */
+/**
+ * The document a frame is given. Inline styles only — a frame inherits nothing from the app.
+ *
+ * D4 — `script-src 'unsafe-inline'` is REQUIRED in the policy below, and its absence was a real defect.
+ *
+ * The height measurement is a script inside this document, and the policy was `default-src 'none'` with no
+ * `script-src`, which blocked it. The frame therefore never reported its height and stayed at `minHeight` --
+ * measured: an 80px frame holding 900px of content, with no internal scrollbar, so the rest of the diagram was
+ * unreachable. Report #4 (`2026-09-15T05-10-32-595Z-324ec8df`): "view of image is made small and i must scroll
+ * up and down when it should fill an appropriate space".
+ *
+ * This does NOT weaken the isolation. The frame still has a NULL ORIGIN: it cannot read the app's cookies,
+ * localStorage, DOM or URL, and it cannot fetch. What it gains is the ability to measure itself, which only it
+ * can do -- that is the one thing the null origin costs.
+ */
 function wrap(body: string, background: string, color: string): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; script-src 'unsafe-inline'">
 <style>
   html, body { margin: 0; padding: 0; }
   body {

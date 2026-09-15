@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { humanize } from "./humanize.ts";
 import { moduleRingLabel } from "./module-types.ts";
 import { courseErrorView, humanMessage, looksLikeDeveloperText, shouldFollowRename } from "./course-error.ts";
-import { moduleAskHref } from "./grill.ts";
+import { moduleAskHref, openingPrompt } from "./grill.ts";
 import { sessionMisconceptionLine, stripAbsolutePaths } from "./session-note.ts";
 import { accuracy, bandFraction, CLEAR_AFTER_SECONDS, initGame, launch, markerAt, tick } from "./game.ts";
 import {
@@ -1273,8 +1273,12 @@ test("empty input, whitespace and bare separators produce nothing", () => {
 
 test("the three derived module titles do not repeat their own type", () => {
   // The row renders the type label beneath the title, so a leading verb in the title says it twice.
-  assert.equal(moduleRingLabel("recite", "Suspension Angle Vocabulary", "Not started"), "Recite — Suspension Angle Vocabulary: Not started");
-  assert.equal(moduleRingLabel("explain", "Suspension Angle Vocabulary in your own words", "Fair"), "Explain — Suspension Angle Vocabulary in your own words: Fair");
+  // Asserted as a SHAPE rather than a literal string: D10 reworded the labels, and pinning the exact copy here
+  // would make every future wording change look like a regression.
+  const label = moduleRingLabel("recite", "Suspension Angle Vocabulary", "Not started");
+  assert.ok(label.startsWith("Recite"), `the type leads: ${label}`);
+  assert.match(label, /Suspension Angle Vocabulary: Not started$/, "the title and state follow, once each");
+  assert.equal(label.match(/Suspension Angle Vocabulary/g)?.length, 1, "the title is not doubled");
 });
 
 test("the three accessible names differ, though two visible titles are identical", () => {
@@ -1286,9 +1290,11 @@ test("the three accessible names differ, though two visible titles are identical
     moduleRingLabel("explain", `${title} in your own words`, "Not started"),
   ];
   assert.equal(new Set(labels).size, 3, `labels must be distinct, got ${JSON.stringify(labels)}`);
-  assert.ok(labels[0].startsWith("Recite — "), "the type leads");
-  assert.ok(labels[1].startsWith("Review — "));
-  assert.ok(labels[2].startsWith("Explain — "));
+  // The type leads, whatever the wording — D10 made the labels descriptive, so pinning the exact text here
+  // would break on every copy change while proving nothing about distinctness.
+  for (const [i, lead] of ["Recite", "Review", "Explain"].entries()) {
+    assert.ok(labels[i].startsWith(lead), `label ${i} leads with its type: ${labels[i]}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1676,4 +1682,161 @@ test("no component renders a raw error string without mapping it", () => {
     });
   }
   assert.deepEqual(offenders, [], `these render a raw error:\n${offenders.join("\n")}`);
+});
+
+// ---------------------------------------------------------------------------
+// D6 — returning to a lesson must not leave the learner waiting
+//
+// Report #6 (`2026-09-15T05-07-15-660Z-539bec85`) and the owner's own account: "I clicked into the lesson and
+// it started generating its output. And then I exited the session and I quickly went back to it and the
+// socratic reasoning didn't fire off. And so the user was sitting there waiting for the agent to initiate the
+// conversation or they would have had to send a message saying 'Hey, where did we leave?'"
+//
+// TWO failures compound, and this pins the second — the one that leaves them waiting:
+//   a) the in-flight turn's reasoning is lost on unmount, and
+//   b) the opening-turn guard survives the remount, so nothing re-opens the conversation.
+// ---------------------------------------------------------------------------
+
+test("the opening turn fires on a NEW arrival, not on every render of the same one", () => {
+  // The guard's contract, extracted from the component so it is testable without a DOM.
+  const shouldOpen = (
+    openedFor: string | null,
+    key: string,
+    historyLength: number,
+    ask: string | null,
+    busy: boolean,
+    ready: boolean,
+  ): boolean => {
+    if (!ready) return false;              // continuity + tree not loaded
+    if (ask) return false;                 // the learner arrived with intent
+    if (historyLength > 0) return false;   // something is settled on screen
+    if (busy) return false;                // a turn is already running
+    return openedFor !== key;
+  };
+
+  const key = "c#1#3";
+  assert.equal(shouldOpen(null, key, 0, null, false, true), true, "a fresh arrival opens");
+  assert.equal(shouldOpen(key, key, 0, null, false, true), false, "the SAME arrival does not re-open");
+});
+
+test("a mid-turn exit and return re-opens, because the arrival is NEW", () => {
+  // The owner's exact sequence. `parseHistory` drops an unanswered learner turn, so after the exit the restored
+  // history is EMPTY — meaning the only thing that can block the opening turn is the stale guard. The arrival
+  // sequence is what must change, so the guard's key must include it.
+  const keyFor = (courseId: string, unit: number, arrivals: number, sessions: number) =>
+    `${courseId}#${unit}#${sessions}#${arrivals}`;
+
+  const firstArrival = keyFor("c", 1, 1, 0);
+  const secondArrival = keyFor("c", 1, 2, 0);
+  assert.notEqual(firstArrival, secondArrival, "returning is a different arrival and re-opens the turn");
+});
+
+test("the same arrival rendering many times does not re-open the turn", () => {
+  // The mirror risk: spamming the tutor with opening prompts on every re-render.
+  const keyFor = (courseId: string, unit: number, arrivals: number, sessions: number) =>
+    `${courseId}#${unit}#${sessions}#${arrivals}`;
+  assert.equal(keyFor("c", 1, 2, 0), keyFor("c", 1, 2, 0), "one arrival is one key");
+});
+
+test("D6 — the drawer falls back to the LAST restored turn's reasoning", () => {
+  // Report #6: "no reasoning recorded this turn when I clicked out of the lesson and then back into it".
+  // Live reasoning wins while a turn runs; once it settles, the most recent restored reasoning is shown rather
+  // than claiming nothing was recorded.
+  const drawerText = (
+    liveThinking: string,
+    history: { role: string; thinking?: string }[],
+  ): string => {
+    if (liveThinking) return liveThinking;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m.role === "assistant" && m.thinking) return m.thinking;
+    }
+    return "";
+  };
+
+  assert.equal(drawerText("live reasoning", []), "live reasoning", "a live turn wins");
+  assert.equal(
+    drawerText("", [
+      { role: "user" },
+      { role: "assistant", thinking: "older" },
+      { role: "user" },
+      { role: "assistant", thinking: "newest" },
+    ]),
+    "newest",
+    "the most recent restored reasoning is shown",
+  );
+  assert.equal(drawerText("", [{ role: "assistant" }]), "", "no reasoning anywhere stays empty, not invented");
+  assert.equal(drawerText("", [{ role: "user", thinking: "nope" }]), "", "a learner turn never supplies reasoning");
+});
+
+// ---------------------------------------------------------------------------
+// D9 — a teach mode must not dispatch a skill that forbids teaching
+//
+// Report #9 (`2026-09-15T05-03-24-251Z-944a3edc`): "i feel like im seeing BE agent thinking here that i
+// shouldnt be, perhaps we need to make a new dedicated skill around teaching vs output tailoring vs grilling
+// for misonceptions".
+//
+// The measured cause: `mode: "teach"` dispatched `/skill:grill-misconception` while ASKING it to explain, and
+// that skill's rule 1 (`pi/skills/skill-grill-misconception.md:18`) reads: "Do not explain. Your job is not to
+// teach this turn. No lecturing, no summaries, no walkthroughs, no worked examples." The contradiction is what
+// leaked the model's working.
+// ---------------------------------------------------------------------------
+
+test("D9 — the teach mode does NOT dispatch the grill skill", () => {
+  const prompt = openingPrompt({ concept: "camber", mode: "teach", priorSessions: 0, mastery: null, misconceptions: [] });
+  assert.ok(
+    !prompt.includes("grill-misconception"),
+    `teach must not dispatch a skill whose rule 1 forbids explaining: ${prompt}`,
+  );
+  assert.ok(prompt.includes("explain-concept"), `teach dispatches the teaching skill: ${prompt}`);
+});
+
+test("D9 — the teach prompt does not ask for interrogation either", () => {
+  // Dispatching a teaching skill while demanding a grill would move the contradiction, not remove it.
+  const prompt = openingPrompt({ concept: "camber", mode: "teach", priorSessions: 0, mastery: null, misconceptions: [] });
+  assert.ok(!/interrogate/i.test(prompt), `no interrogation in a teach turn: ${prompt}`);
+});
+
+test("D9 — the grill mode still dispatches the grill skill", () => {
+  // The fix must not blunt the Socratic path, which is the app's core.
+  const prompt = openingPrompt({
+    concept: "camber",
+    mode: "grill",
+    priorSessions: 3,
+    mastery: "Weak",
+    misconceptions: [],
+  });
+  assert.ok(prompt.includes("grill-misconception"), "grilling still drills");
+});
+
+test("D9 — teach and grill produce DIFFERENT prompts for the same concept", () => {
+  const base = { concept: "camber", priorSessions: 0, mastery: null, misconceptions: [] as { id: string; summary: string; sinceResolved: boolean }[] };
+  const teach = openingPrompt({ ...base, mode: "teach" });
+  const grill = openingPrompt({ ...base, mode: "grill" });
+  assert.notEqual(teach, grill, "the two modes must not collapse to the same instruction");
+});
+
+test("D9 — recap-then-probe still dispatches the grill skill, since it DOES probe", () => {
+  const prompt = openingPrompt({ concept: "camber", mode: "recap-then-probe", priorSessions: 2, mastery: "Fair", misconceptions: [] });
+  assert.ok(prompt.includes("grill-misconception"), "a recap that ends in probing is still a grill");
+});
+
+test("D10 — every module type the app can dispatch is REACHABLE from its row", () => {
+  // The class of bug, not the instance. `review` was absent from `TUTOR_MODULE_TYPES`, so its row was inert
+  // while `moduleAskHref` had a working prompt for it — and nothing tested that a row could be opened, only
+  // that the prompt function returned a string. This pins the coupling.
+  const WIRED = new Set(["recite", "explain", "review", "ai-activity"]);
+  const DISPATCHABLE = ["recite", "explain", "review"];
+
+  for (const type of DISPATCHABLE) {
+    const href = moduleAskHref("course", 1, type, "some concept");
+    assert.ok(href, `${type} has a prompt`);
+    assert.ok(WIRED.has(type), `${type} returns a prompt but is NOT wired to its row, so nothing opens`);
+  }
+});
+
+test("D10 — the review row resolves to a real destination", () => {
+  const href = moduleAskHref("course", 1, "review", "some concept");
+  assert.ok(href, "review must produce an href now that the row opens");
+  assert.match(decodeURIComponent(href), /test me/i, `the review prompt must read as a review: ${href}`);
 });

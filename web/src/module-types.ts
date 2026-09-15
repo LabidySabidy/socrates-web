@@ -34,6 +34,15 @@ export const MODULE_PATHS: Record<ModuleType, string> = {
 };
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
+  // D10 — the label stays a SHORT TYPE, and the row's TITLE says what the exercise is.
+  //
+  // Report #10 (`2026-09-15T05-00-46-178Z-d8d0851d`): "it's hard to tell what the difference between each of
+  // the three sections is. We need to come up with a better naming strategy."
+  //
+  // The naming strategy, settled: this label is the CATEGORY and stays one or two words, and the distinction
+  // lives in the module title above it (see `course-model.ts`). Making both descriptive produced a stutter —
+  // the title and its own label reading the same — which an existing guard in `course-model.test.ts` correctly
+  // caught. Category here, action there, and neither repeats the concept name from the heading.
   recite: "Recite",
   explain: "Explain",
   review: "Review",

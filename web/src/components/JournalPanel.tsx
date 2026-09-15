@@ -5,10 +5,11 @@
  * inferred from the absence of a record.
  */
 import { useEffect, useState } from "react";
-import { fetchJournal, fetchSessionMarkdown } from "../api.ts";
-import { sessionMisconceptionLine, stripAbsolutePaths } from "../session-note.ts";
+import { fetchJournal, fetchSessionTurns } from "../api.ts";
+import { sessionMisconceptionLine } from "../session-note.ts";
 import { fetchContinuity, type ContinuityResponse } from "../api.ts";
 import { humanMessage } from "../course-error.ts";
+import { Markdown } from "./Markdown.tsx";
 import type { Journal } from "../types.ts";
 import { formatDay } from "../select.ts";
 import { humanize } from "../humanize.ts";
@@ -17,7 +18,20 @@ export function JournalPanel({ courseId }: { courseId: string }) {
   const [journal, setJournal] = useState<Journal | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The session record currently open, and its content. One open at a time: the list is a list. */
-  const [opened, setOpened] = useState<{ file: string; text?: string; error?: string } | null>(null);
+  /**
+   * D2 — the opened session shows the REAL conversation.
+   *
+   * Report #2 (`2026-09-15T05-12-06-337Z-8dc4972f`): "shows back end thoughts instead of the conversation we
+   * had as expected". It used to fetch the session RECORD and print it in a `<pre>` — a wall of markdown with
+   * absolute paths, `MIS-001` ids and `**Decision:** Hold at 🟥`. Owner's decision: "show the full real
+   * transcript for continuity. It's a lot easier on the brain."
+   */
+  const [opened, setOpened] = useState<{
+    file: string;
+    turns?: { role: string; text: string; thinking?: string }[];
+    available?: boolean;
+    error?: string;
+  } | null>(null);
   /** Present-tense state, so a record's claims can be shown against what is true now. */
   const [continuity, setContinuity] = useState<ContinuityResponse | null>(null);
 
@@ -28,8 +42,8 @@ export function JournalPanel({ courseId }: { courseId: string }) {
     }
     setOpened({ file });
     try {
-      const text = await fetchSessionMarkdown(courseId, file);
-      setOpened({ file, text });
+      const res = await fetchSessionTurns(courseId, file);
+      setOpened({ file, turns: res.turns, available: res.available });
     } catch (err) {
       setOpened({ file, error: err instanceof Error ? err.message : String(err) });
     }
@@ -105,11 +119,22 @@ export function JournalPanel({ courseId }: { courseId: string }) {
               </button>
             </header>
             {opened?.file === s.file ? (
-              <div className="session-body reading">
+              <div className="session-body reading session-transcript">
                 {opened.error ? (
                   <p className="notice">{humanMessage(opened.error)}</p>
+                ) : opened.available === false ? (
+                  // The record exists but its transcript is gone. Said plainly rather than shown as an empty
+                  // box, which would read as a rendering bug.
+                  <p className="tray-empty">This session&rsquo;s transcript is no longer available.</p>
+                ) : (opened.turns ?? []).length === 0 ? (
+                  <p className="tray-empty">This session recorded no conversation.</p>
                 ) : (
-                  <pre className="session-md">{stripAbsolutePaths(opened.text ?? "")}</pre>
+                  (opened.turns ?? []).map((turn, i) => (
+                    <div className={`session-turn session-turn-${turn.role}`} key={i}>
+                      <span className="eyebrow">{turn.role === "user" ? "You" : "Tutor"}</span>
+                      <Markdown text={turn.text} />
+                    </div>
+                  ))
                 )}
               </div>
             ) : null}

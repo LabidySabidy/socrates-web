@@ -38,6 +38,7 @@ import {
   PASSIVITY_MESSAGE,
   refusalReason,
 } from "../passivity.ts";
+import { readLearningNotice, severityNote, type TelemetryNotice } from "../telemetry-notice.ts";
 /**
  * The composer's growth cap, in px. MUST match `.composer textarea { max-height }` in theme.css — the
  * stylesheet owns the number and this reads it at runtime so the two cannot drift.
@@ -118,6 +119,8 @@ export function LessonPage({
   const startedAt = useRef(0);
   const lastOutputAt = useRef(0);
   const [retrying, setRetrying] = useState<{ attempt: number; maxAttempts: number } | null>(null);
+  /** Misconceptions the tutor recorded this turn, shown as notices rather than raw JSON. */
+  const [notices, setNotices] = useState<TelemetryNotice[]>([]);
   /** The last prompt, so Retry can re-send it without asking the learner to retype anything. */
   const lastSent = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -182,7 +185,15 @@ export function LessonPage({
     if (ask) return; // the learner arrived with intent; the dispatch effect owns it
     if (history.length > 0) return; // something is already settled on screen
     if (busy) return;
-    const key = `${courseId}#${unitNumber}#${continuity.sessions.length}`;
+    // D6 — `arrival` is part of the key, and it is the whole fix.
+    //
+    // The owner's report: "I clicked into the lesson and it started generating its output. Then I exited and
+    // quickly went back and the socratic reasoning didn't fire off … the user was sitting there waiting for
+    // the agent to initiate the conversation." Leaving and returning reuses this component instance, so
+    // `openedFor` survived and the guard suppressed the second opening turn. `App` already passes `arrival`
+    // (the navigation sequence), and it changes on every navigation — so the same arrival no longer re-opens,
+    // but a NEW one does.
+    const key = `${courseId}#${unitNumber}#${continuity.sessions.length}#${arrival}`;
     if (openedFor.current === key) return;
     openedFor.current = key;
 
@@ -213,7 +224,7 @@ export function LessonPage({
       "opening",
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when the unit's state is known
-  }, [continuity, tree, ask, history.length, busy, courseId, unitNumber]);
+  }, [continuity, tree, ask, history.length, busy, courseId, unitNumber, arrival]);
 
   useEffect(() => {
     let alive = true;
@@ -298,7 +309,25 @@ export function LessonPage({
   const outOfRange = resolution?.kind === "out-of-range" ? resolution : null;
   /** A unit number safe to print: never exponential, never fractional, never a number the course lacks. */
   const unitLabel = unit ? String(unit.n) : null;
-  const { thinking, prose: rawProse } = splitTurn(turn);
+  const { thinking: liveThinking, prose: rawProse } = splitTurn(turn);
+
+  /**
+   * D6 — the reasoning the drawer shows.
+   *
+   * Live reasoning when a turn is running; otherwise the MOST RECENT settled turn's, restored from the record.
+   * The owner's report (`2026-09-15T05-07-15-660Z-539bec85`): "the socratic reasoning is saying that no
+   * reasoning recorded this turn when I clicked out of the lesson and then back into it". Restored turns now
+   * carry their `thinking` (see `history.ts`), so falling back to it is what stops a fresh load claiming the
+   * tutor recorded nothing when its working is sitting right there.
+   */
+  const thinking = (() => {
+    if (liveThinking) return liveThinking;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m.role === "assistant" && m.thinking) return m.thinking;
+    }
+    return "";
+  })();
 
   /**
    * The live clock, ticking only while a turn is running.
@@ -402,6 +431,7 @@ export function LessonPage({
     setBusy(true);
     setError(null);
     setTurn(emptyTurn());
+    setNotices([]);
     // Appended BEFORE the reply, exactly as the original did.
     setHistory((h) => appendUser(h, message, origin));
 
@@ -462,6 +492,18 @@ export function LessonPage({
         parsed = JSON.parse(raw) as { type?: string; assistantMessageEvent?: unknown };
       } catch {
         return; // a non-JSON line (e.g. raw stdout) is not part of the turn
+      }
+      // A recorded misconception is shown as a notice. The server has already stripped the raw block from the
+      // stream, so this is the ONLY way the learner learns what the tutor thinks they got wrong.
+      const notice = readLearningNotice(parsed);
+      if (notice) {
+        setNotices((prev) =>
+          // De-duplicate by id+kind: a replayed stream must not stack the same notice twice.
+          prev.some((n) => n.kind === notice.kind && n.id === notice.id && n.description === notice.description)
+            ? prev
+            : [...prev, notice],
+        );
+        return;
       }
       if (isPassivitySignal(parsed)) {
         // Trigger preserved: the TUTOR signals passivity, the client never diagnoses it.
@@ -596,6 +638,33 @@ export function LessonPage({
                   {failureView(error).action}
                 </button>
               ) : null}
+            </div>
+          ) : null}
+
+          {notices.length > 0 ? (
+            <div className="learning-notices">
+              {/* A recorded misconception, shown in the conversation because nothing else in the app states
+                  what the tutor thinks the learner got wrong. Deliberately its own treatment rather than
+                  prose: the owner asked for a separate background so it reads as a system note, not the tutor
+                  talking. A plain badge/sm2 update NEVER reaches here — the server sends no notice for those,
+                  because 26 of 29 real events carry no misconception. */}
+              {notices.map((n, i) => (
+                <div
+                  className={`learning-notice learning-notice-${n.kind}`}
+                  key={`${n.kind}-${n.id ?? i}`}
+                  role="status"
+                >
+                  <div className="learning-notice-head">
+                    <span className="learning-notice-title">{n.title}</span>
+                    {n.id ? <span className="eyebrow">{n.id}</span> : null}
+                  </div>
+                  {n.concept ? <p className="learning-notice-concept">{humanize(n.concept)}</p> : null}
+                  <blockquote className="learning-notice-quote">{n.description}</blockquote>
+                  {severityNote(n.severity) ? (
+                    <p className="learning-notice-severity">Severity: {severityNote(n.severity)}</p>
+                  ) : null}
+                </div>
+              ))}
             </div>
           ) : null}
 

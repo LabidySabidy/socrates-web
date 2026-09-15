@@ -203,7 +203,7 @@ export interface SessionStatus {
 export const fetchSessionStatus = () => get<SessionStatus>("/api/session");
 
 export interface HistoryResponse {
-  turns: { role: "user" | "assistant"; text: string }[];
+  turns: { role: "user" | "assistant"; text: string; thinking?: string }[];
   /** The newest session the turns came from, for the "which record is this" affordance. */
   session: string | null;
   /** Every session the turns were assembled from, oldest first. */
@@ -227,6 +227,17 @@ export interface HistoryResponse {
  */
 export const fetchHistory = (id: string, unit: number) =>
   get<HistoryResponse>(`/api/courses/${encodeURIComponent(id)}/history?unit=${encodeURIComponent(String(unit))}`);
+
+/**
+ * D2 — a named session's REAL conversation, for the journal.
+ *
+ * Distinct from the session RECORD (`fetchSessionMarkdown`), which is the tutor's bookkeeping: it carries
+ * `# Session …`, `MIS-001` ids and `**Decision:** Hold at 🟥` and is not what the learner remembers reading.
+ */
+export const fetchSessionTurns = (id: string, file: string) =>
+  get<{ turns: { role: "user" | "assistant"; text: string; thinking?: string }[]; available: boolean }>(
+    `/api/courses/${encodeURIComponent(id)}/journal/${encodeURIComponent(file)}/turns`,
+  );
 
 export interface ConceptStanding {
   concept: string;

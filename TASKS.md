@@ -610,3 +610,61 @@ WHOLE message, so the error is already on the wire), `settings-manager.js:555-55
   the real lesson scrolls inside an inner pane while the document reports a smaller value, AND a capture of a
   scrolled real lesson is visually correct. Owner chose **option 2 (fix positioning)** over removing the DOM
   fallback.
+
+## T-062…T-073 — The 18 reported defects of 2026-09-15 (ALL DONE)
+
+Source: 21 real reports in `~/.socrates/reports/` (3 were fixed in `8d0f474`: #19–#21). Investigation and root
+causes in `.agent/plans/2026-09-15-reported-defects-fix.md`. Each root cause below has a file:line or a
+measurement behind it.
+
+- [x] **T-062 (D5, CRITICAL)** No telemetry block reaches the learner. **Done when:** no `text_delta` on
+  `/api/stream` contains `<learning-telemetry>`, INCLUDING when the tag is split across deltas (measured: a
+  naive per-delta strip fails 3 of 4 split cases); the tutor is instructed not to emit it inline; and a
+  `misconception_open` renders as a styled notice quoting the recorded `description` — while a plain
+  badge/sm2 update NEVER claims a misconception (26 of 29 real events carry none).
+
+- [x] **T-063 (D2, HIGH)** Opening a session shows the real transcript. **Done when:** the session view renders
+  learner/tutor turns and contains no `# Session`, no `MIS-`, no `**Status:**`, no absolute path.
+
+- [x] **T-064 (D3, HIGH)** Duplicate sessions collapse. **Done when:** the 16 recorded sessions for
+  `automotive-alignments` (all the same unit, the same 2 misconceptions) render as ONE row, **silently** — no
+  repeat count per the owner.
+
+- [x] **T-065 (D6, HIGH)** A lesson opened after a mid-turn exit restores the conversation AND its reasoning.
+  **Done when:** leaving mid-turn and returning shows the prior turns with reasoning, and the tutor opens the
+  turn — the owner's account: "the user was sitting there waiting for the agent to initiate the conversation".
+  Root cause is two failures, not one: reasoning dropped by `history.ts:119`, and the opening-turn effect gated
+  on a non-empty `history.length`.
+
+- [x] **T-066 (D1+13+14, HIGH)** Full history. **Done when:** restoring a conversation returns all turns — the
+  tail cap and `truncated` are removed rather than left silently active.
+
+- [x] **T-067 (D9, HIGH)** A teach mode that may teach. **Done when:** `mode: "teach"` does not dispatch
+  `grill-misconception`, whose rule 1 (`skill-grill-misconception.md:18`) says "Do not explain. Your job is not
+  to teach this turn."
+
+- [x] **T-068 (D8+D15, MEDIUM)** Locale is USA/Texas, as a FIXED constant — not a setting, not inferred.
+  **Done when:** the tutor's instructions carry the locale and US spelling/idiom/units are used; "sparky" and
+  "ceiling rose" are avoided or glossed. Reversal path recorded in `DECISIONS.md`.
+
+- [x] **T-069 (D10, MEDIUM)** Review is clickable. **Done when:** `review` is in `TUTOR_MODULE_TYPES`
+  (`CoursePage.tsx:20`), the row is an anchor with an href, AND a test asserts every interactive module type is
+  reachable — the omission that caused this was untested (`ui.test.ts` covers `recite` and `explain`, never
+  `review`).
+
+- [x] **T-070 (D10, MEDIUM)** Recite/Review/Explain are distinguishable and the heading stops repeating the
+  concept. **Done when:** the three rows read as different actions, and the heading no longer prints the concept
+  name the row already carries.
+
+- [x] **T-071 (D10, MEDIUM)** The heading does not overlap its content. **Done when:** measured in a browser,
+  the h1's bottom is above the next element's top (today: `h1Bottom 160`, `nextTop 113` — a 47px overlap).
+
+- [x] **T-072 (D11, MEDIUM)** Rename only inside a course. **Done when:** the home page renders no rename
+  affordance (`HomePage.tsx:167` today), and renaming is available from the course header.
+
+- [x] **T-073 (D4, MEDIUM)** A generated image is readable. **PARTIAL** — the clamp is identified
+  (`GeneratedFrame.tsx:54,74`) but the defect is NOT yet reproduced. Reproduce before fixing.
+
+Deferred, recorded not actioned: **D7** (whisper VTT — a feature), **D18** (topic selection — a design
+question), **Review locking** (owner: "I can determine if that's needed down the line" — the enabling condition
+is a `badge` event, already recorded, so the change stays purely additive).

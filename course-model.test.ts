@@ -342,11 +342,16 @@ test("a legacy slug course derives HUMAN module and group titles, and keeps the 
   const unit = course.units[0];
 
   assert.equal(unit.groups[0].title, "Alpha One", "the group heading is Title Case");
-  assert.deepEqual(
-    unit.groups[0].modules.slice(0, 3).map((m) => m.title),
-    ["Alpha One", "Alpha One", "Alpha One in your own words"],
-    "the derived titles are display strings, so they are human at the point they are built",
-  );
+  // D10 changed WHAT the titles say — they name the exercise rather than repeating the concept — but this
+  // test's real purpose is that they are DISPLAY strings built human, so it asserts that property instead of
+  // the literal wording. Pinning the copy here would make every wording change look like a regression.
+  const titles = unit.groups[0].modules.slice(0, 3).map((m) => m.title);
+  assert.equal(new Set(titles).size, 3, `the three actions read differently: ${JSON.stringify(titles)}`);
+  for (const title of titles) {
+    assert.ok(title.length > 0, "each has a title");
+    assert.ok(!title.includes("-"), `no raw slug leaks into a title: ${title}`);
+    assert.ok(!/alpha one/i.test(title), `the concept name is not repeated on every row: ${title}`);
+  }
 
   // …and the identity is untouched, which is what keeps telemetry, module ids and the grill prompt
   // working. The grill prompt carries the concept the tutor will match against SCHEMA.md.
@@ -386,11 +391,18 @@ test("a course authored with human card names needs no humanising, and its ids a
 
   assert.equal(unit.title, "Wheel anatomy and tension model", "the heading is the name, verbatim");
   assert.equal(unit.groups[0].title, "Wheel Anatomy And Tension Model", "and reads the same as a slug would");
+  // The point here is that the AUTHORED heading and the DERIVED slug converge — that is what makes a
+  // hand-written course behave like a slug-named one. It is asserted on the concept, not on the row title:
+  // D10 made the titles name the exercise, so the title no longer carries the concept by design.
+  // `concept` stays RAW by design (`course-model.ts:229`) — it is the tutor's match key against SCHEMA.md
+  // headings, so humanising it would break the join. The authored heading and the derived slug converge on the
+  // GROUP TITLE, which is the humanised display string for the same card.
   assert.equal(
-    unit.groups[0].modules[0].title,
+    unit.groups[0].title,
     "Wheel Anatomy And Tension Model",
-    "the authored heading and the derived slug converge on one string",
+    "the authored heading and the derived slug converge on one display string",
   );
+  assert.equal(unit.groups[0].modules[0].concept, "Wheel anatomy and tension model", "the match key stays raw");
   assert.equal(unit.groups[0].modules[0].id, "wheel-anatomy-and-tension-model/recite", "the slug is derived");
   rmSync(dir, { recursive: true, force: true });
 });
@@ -404,21 +416,25 @@ test("casing the slugger destroyed is not recovered — the documented limitatio
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("no derived module title repeats the type label printed beside it", () => {
-  // The row renders `moduleTypeLabel(mod.type)` under the title, so a leading verb would be a stutter.
-  // Checked against the label map itself rather than a hardcoded verb, so this keeps holding if a label
-  // is ever reworded.
+test("no derived module title repeats the concept NAME the heading already shows", () => {
+  // D10 — report #10 (`…d8d0851d`): "the top section just repeats 'How a house lighting circuit works' it
+  // causes the string to lose their meaning and value". Measured on the real course page, the concept name
+  // appeared FIVE times: the h1, the h2, and all three module rows. Each row is now named for its action.
   const course = buildCourse(load("course-basic"));
   const modules = course.units[0].groups[0].modules;
   const byType = new Map(modules.map((m) => [m.type, m]));
 
-  assert.equal(byType.get("recite")?.title, "Alpha One");
-  assert.equal(byType.get("review")?.title, "Alpha One");
-  assert.equal(
-    byType.get("explain")?.title,
-    "Alpha One in your own words",
-    "the qualifier stays — it is what distinguishes free recall from a review",
-  );
+  const concept = course.units[0].groups[0].title;
+  for (const [type, m] of byType) {
+    if (!["recite", "review", "explain"].includes(type)) continue;
+    assert.ok(
+      !m.title.includes(concept),
+      `${type} still repeats the concept name the heading already carries: ${JSON.stringify(m.title)}`,
+    );
+  }
+  // And the three are distinguishable WITHOUT the small label underneath, which was the owner's complaint.
+  const titles = ["recite", "review", "explain"].map((ty) => byType.get(ty)?.title);
+  assert.equal(new Set(titles).size, 3, `the three actions must read differently: ${JSON.stringify(titles)}`);
   assert.equal(byType.get("misconceptions")?.title, "Misconceptions (2)", "the count module is untouched");
 
   // Scoped to the three verb-stripped types: `Misconceptions (N)` deliberately repeats its label,
@@ -432,16 +448,17 @@ test("no derived module title repeats the type label printed beside it", () => {
   }
 });
 
-test("two modules share a visible title, so their accessible names must differ", () => {
-  // The reason the ring label folds the type back in: the visible distinction is the label BENEATH the
-  // title, and a screen reader has no beneath.
+test("every visible module title is distinct, so the accessible names need no rescuing", () => {
+  // This test USED to assert the opposite premise: "the premise: some visible titles repeat … and every
+  // accessible name is distinct". D10 removed the repetition, so the premise no longer holds and the ring
+  // label's type prefix is now belt-and-braces rather than the only distinction.
   const course = buildCourse(load("course-basic"));
   const modules = course.units[0].groups[0].modules.filter((m) => m.mastery);
   const visible = modules.map((m) => m.title);
   const accessible = modules.map((m) => moduleRingLabel(m.type as ModuleType, m.title, m.mastery!.state));
 
-  assert.ok(new Set(visible).size < visible.length, "the premise: some visible titles repeat");
-  assert.equal(new Set(accessible).size, accessible.length, "…and every accessible name is distinct");
+  assert.equal(new Set(visible).size, visible.length, `visible titles are distinct: ${JSON.stringify(visible)}`);
+  assert.equal(new Set(accessible).size, accessible.length, "and accessible names still are");
 });
 
 test("a quiz module's title is humanised, not the raw unit id", () => {

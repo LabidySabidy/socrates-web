@@ -17,7 +17,7 @@ import { ContinueStrip } from "./ContinueStrip.tsx";
 import { ManageCourses } from "./ManageCourses.tsx";
 import { hrefCourse } from "../router.ts";
 import { humanMessage } from "../course-error.ts";
-import { EditableTitle } from "./EditableTitle.tsx";
+import { humanize } from "../humanize.ts";
 import { filterCourses, totalMasteryCounts } from "../select.ts";
 
 function greeting(now = new Date()): string {
@@ -164,13 +164,13 @@ export function HomePage({
                       label={`${course.label}: ${aggregateState(course)}`}
                     />
                   </div>
-                  <EditableTitle
-                    courseId={course.id}
-                    title={course.label}
-                    as="h2"
-                    className="name"
-                    onRenamed={() => onChanged()}
-                  />
+                  {/* D11 — the catalogue shows the name, it does not offer to rename it.
+                      Report #11 (`2026-09-15T04-59-21-950Z-2230e300`): "i dont like that on the home page if I
+                      click the name it tries to rename it, renaming should only be available once you're in the
+                      course". Browsing a list and editing a name are different intentions, and a destructive
+                      control sitting under a click meant for navigation is a trap. Renaming lives in the course
+                      header now. */}
+                  <h2 className="name">{humanize(course.label)}</h2>
                   <a className="card-open" href={hrefCourse(course.id)}>
                     <p className="desc">
                       {course.concepts === 0

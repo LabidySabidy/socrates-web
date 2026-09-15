@@ -29,6 +29,9 @@ import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { parseHistory } from "./history.ts";
 import { foldLine, foldText, type TurnOutcome } from "./web/src/turn-result.ts";
+import { createTelemetryStripper, type TelemetryStripper } from "./web/src/stream-clean.ts";
+import { stripTelemetryFromLine } from "./stream-clean-line.ts";
+import { telemetryNotice } from "./web/src/telemetry-notice-parse.ts";
 import { buildContinuity, lessonMode } from "./continuity.ts";
 import {
   MAX_IMAGE_BYTES,
@@ -221,6 +224,17 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   let turnText = "";
   let turnFailure: string | null = null;
   let retryNotice: { attempt: number; maxAttempts: number; reason?: string } | null = null;
+  /**
+   * The telemetry stripper for the CURRENT turn.
+   *
+   * Turn-scoped, never shared: a partial `<learning-tele` held from one turn must not absorb the opening text
+   * of the next. Replaced whenever a turn starts.
+   */
+  let telemetryStripper: TelemetryStripper = createTelemetryStripper();
+  /** How many captured blocks have already become notices, so each is sent exactly once. */
+  let noticesSent = 0;
+  /** Notice frames for this turn, so a late subscriber gets them on replay like any other line. */
+  let turnNotices: string[] = [];
   let settled = true;
   let activeStream: ServerResponse | null = null;
   /** Which course the in-flight (or most recent) turn belongs to. */
@@ -346,29 +360,65 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     bridgeWired = true;
     bridge.onLine((line) => {
       if (settled) return;
-      turnLines.push(line);
+      // THE DELTA THE LEARNER SEES, not merely the message that gets persisted.
+      //
+      // `pi/extensions/learning` strips `<learning-telemetry>` on `message_end`, and pi applies that
+      // replacement — but `message_end` fires AFTER generation, while deltas stream DURING it. So the tag
+      // reached the browser and the cleanup was always too late. The session file looked clean, which is why
+      // reading stored data never showed this. It has to be stripped on the channel being watched.
+      //
+      // The buffered stripper is required, not a nicety: a per-delta regex leaks in 3 of 4 split cases.
+      const cleanedLine = stripTelemetryFromLine(line, telemetryStripper);
+      turnLines.push(cleanedLine);
       // Fold EVERY line, not just the text deltas. The failure, the retry notice and the provider's own
       // error message all arrive on this stream and were previously discarded — which is why a failed turn
       // was indistinguishable from a slow one. Folded for the client's benefit too: the retrying state and
       // the elapsed clock are what make the app feel alive during a provider outage.
-      turnState = foldLine(turnState, line);
+      // Folded from the CLEANED line so the turn's own record matches what the learner saw.
+      turnState = foldLine(turnState, cleanedLine);
       turnText = turnState.text;
       turnFailure = turnState.error ?? null;
       if (turnState.retrying) retryNotice = turnState.retrying;
       const res = activeStream;
       if (res) {
         try {
-          res.write(`data: ${line}\n\n`);
+          res.write(`data: ${cleanedLine}\n\n`);
         } catch {
           /* ignore */
         }
       }
       let evt: Record<string, unknown> | null = null;
       try {
-        evt = JSON.parse(line) as Record<string, unknown>;
+        evt = JSON.parse(cleanedLine) as Record<string, unknown>;
       } catch {
         /* not JSON */
       }
+      // A RECORDED MISCONCEPTION IS WORTH SHOWING. The stripper captured what it removed, and the block is
+      // the only place the learner's own belief is stated. Emitted as its own event so the client renders a
+      // notice with a distinct background rather than the learner reading raw JSON.
+      //
+      // Only blocks seen SINCE THE LAST LINE are emitted — the stripper accumulates for the whole turn, so
+      // iterating all of them here would re-send every notice on every subsequent event.
+      {
+        const all = telemetryStripper.captured();
+        for (const block of all.slice(noticesSent)) {
+          const notice = telemetryNotice(block);
+          // `null` for a plain badge/sm2 update — 26 of 29 real events. Sending those would put a
+          // misconception notice in front of the learner for something that was never recorded.
+          if (!notice) continue;
+          const frame = "data: " + JSON.stringify({ type: "learning-notice", notice }) + String.fromCharCode(10, 10);
+          turnNotices.push(frame);
+          if (activeStream) {
+            try {
+              activeStream.write(frame);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        noticesSent = all.length;
+      }
+
       if (evt?.type === "agent_settled") {
         bridge.markIdle();
         // A TURN THAT PRODUCED NOTHING AND CARRIES A FAILURE IS NOT A SUCCESS.
@@ -1012,15 +1062,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           if (!existsSync(s.transcript!)) continue;
           all.push(...parseHistory(readFileSync(s.transcript!, "utf8")));
         }
-        // The tail limit still applies, so a unit with many sittings cannot return an unbounded payload.
-        const TURNS = 40;
-        const turns = all.slice(-TURNS);
+        // NO TAIL. The owner's decision on D1/D13/D14: "I want to see the full history." The previous 40-turn
+        // cap silently dropped the beginning of a long conversation, and `truncated` was set but never
+        // rendered — an invisible loss, which is the same defect family as the telemetry leak fixed in this
+        // round. `truncated` is kept in the payload as `false` so an older client still parses it.
         sendJson(res, 200, {
-          turns,
+          turns: all,
           // The newest session, for the "which record is this" affordance; the turns span all of them.
           session: mine[mine.length - 1].file,
           sessions: mine.map((s) => s.file),
-          truncated: all.length > turns.length,
+          truncated: false,
         });
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
@@ -1045,6 +1096,46 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
       res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
       res.end(markdown);
+      return;
+    }
+
+    /**
+     * D2 — the REAL conversation in a named session.
+     *
+     * Report #2 (`2026-09-15T05-12-06-337Z-8dc4972f`): "opening a past chat is formatted poorly and shows
+     * back end thoughts instead of the conversation we had as expected". The journal route above returns the
+     * session RECORD — a markdown summary with `# Session …`, `MIS-001` ids and `**Decision:** Hold at 🟥` —
+     * which is the tutor's bookkeeping, not the conversation. This route returns the turns instead, read by
+     * the same `parseHistory` the lesson restore uses, so a session reads the way the learner remembers it.
+     */
+    const sessionTurnsMatch = /^\/api\/courses\/([^/]+)\/journal\/([^/]+)\/turns$/.exec(url);
+    if (sessionTurnsMatch && req.method === "GET") {
+      const result = discover();
+      const ref = findCourse(result, decodeURIComponent(sessionTurnsMatch[1]));
+      if (!ref) {
+        sendJson(res, 404, { error: `unknown course: ${sessionTurnsMatch[1]}` });
+        return;
+      }
+      const file = decodeURIComponent(sessionTurnsMatch[2]);
+      // The summary is the authority on whether this name is a session and where its transcript lives;
+      // `readSessionMarkdown` already refuses traversal and non-session names.
+      const session = readJournal(ref.dir).sessions.find((s) => s.file === file);
+      if (!session) {
+        sendJson(res, 404, { error: "no such session" });
+        return;
+      }
+      if (!session.transcript || !existsSync(session.transcript)) {
+        // A session whose transcript was pruned or never written. An honest empty answer, not a 500: the
+        // record still exists, there is simply no conversation to show.
+        sendJson(res, 200, { turns: [], available: false });
+        return;
+      }
+      try {
+        const turns = parseHistory(readFileSync(session.transcript, "utf8"));
+        sendJson(res, 200, { turns, available: true });
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
 
@@ -1468,6 +1559,10 @@ ${BUDAPEST_MODIFIER}` : message;
         // Reset the folded outcome with the lines. Without this a failure would leak into the NEXT turn and
         // report a healthy turn as broken — the mirror of the bug being fixed.
         turnState = { text: "" };
+        // A fresh stripper per turn, so no partial tag survives across a turn boundary.
+        telemetryStripper = createTelemetryStripper();
+        noticesSent = 0;
+        turnNotices = [];
         turnText = "";
         turnFailure = null;
         retryNotice = null;
@@ -1526,6 +1621,9 @@ ${BUDAPEST_MODIFIER}` : message;
       hs(currentTurn, `SUBSCRIBE ${tag} accepted — settled=${settled}, replaying ${turnLines.length} line(s)`);
       res.writeHead(200, SSE_HEADERS);
       for (const line of turnLines) res.write(`data: ${line}\n\n`);
+      // Notices replay with the turn. A subscriber that arrives after the misconception was recorded must
+      // still see the notice — it is part of the conversation, not a transient toast.
+      for (const frame of turnNotices) res.write(frame);
       if (settled) {
         hs(currentTurn, `REPLAY ${tag} settled before subscribing — sending [DONE] and ending`);
         res.write("data: [DONE]\n\n");

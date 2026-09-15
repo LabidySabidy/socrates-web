@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { adoptGlobal, appPiHome, composeSession, ensureHome, preflight, resolveProvider, shippedAssets } from "./session.ts";
@@ -232,4 +232,74 @@ test("a poisoned global config does not reach the session, and the tutor still r
     !reply.includes(MARK),
     `the global config leaked into the reply, which is the whole bug: ${reply.slice(0, 200)}`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// D9 (part 2) — a shipped skill must actually be SERVED
+//
+// The skills list in `composeSession` is hand-maintained. Adding `skill-explain-concept.md` to `pi/skills/`
+// without adding it here would ship a file the tutor can never load, and the lesson would open with
+// `/skill:explain-concept` resolving to nothing — the same broken-looking lesson T-058 describes for
+// `feynman-recite`. This pins that every shipped skill is served.
+// ---------------------------------------------------------------------------
+
+test("every skill file in pi/skills/ is served to the tutor", (t) => {
+  // Exercises the REAL path: `ensureHome` copies pi/skills/ into the app home, and `composeSession` scans what
+  // landed there. Testing against the repo directory would pass for a session that cannot start.
+  const { env } = world(t);
+  ensureHome(env);
+  const shippedDir = join(import.meta.dirname, "pi", "skills");
+  const onDisk = readdirSync(shippedDir).filter((f) => f.endsWith(".md")).sort();
+  assert.ok(onDisk.length > 0, "precondition: skills are shipped");
+
+  const session = composeSession(env);
+  // Split on BOTH separators explicitly: a POSIX-only split leaves the whole Windows path intact, so every
+  // filename fails to match and the guard reports a false failure.
+  const served = session.assetPaths.skills.map((p) => p.split(/[\\/]/).pop()).sort();
+
+  for (const file of onDisk) {
+    assert.ok(
+      served.includes(file),
+      `${file} is shipped but NOT served, so the tutor cannot load it. Served: ${JSON.stringify(served)}`,
+    );
+  }
+});
+
+test("the teach skill is served, so D9's dispatch resolves", (t) => {
+  const { env } = world(t);
+  ensureHome(env);
+  const session = composeSession(env);
+  assert.ok(
+    session.assetPaths.skills.some((p) => p.endsWith("skill-explain-concept.md")),
+    "a teach turn dispatches /skill:explain-concept, so it must be in the served list",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// D8 + D15 — locale
+//
+// Report #8 (`2026-09-15T05-04-12-846Z-509aae37`, "what is a sparky? … is this UK talk?") and #15
+// (`2026-09-15T03-30-48-492Z-04282f90`, "thinks I'm in the UK but I'm in the USA"). Owner's decision: "always
+// assume the USA. Assume I live in Texas … This is not a per learner setting … keep things simple."
+// ---------------------------------------------------------------------------
+
+test("D8/D15 — the session carries a US locale, not the model's default guess", (t) => {
+  const { env } = world(t);
+  const session = composeSession(env);
+  const joined = session.args.join(" ");
+  assert.ok(joined.includes("--append-system-prompt"), `the locale must reach the tutor: ${joined}`);
+  assert.match(joined, /United States|US English|Texas/i, "and it must name the locale");
+});
+
+test("D8/D15 — the locale instruction is NOT a per-learner setting", (t) => {
+  // The owner was explicit: "This is not a per learner setting." A value that varies by environment would make
+  // the behaviour unreproducible, so it is a constant and this pins that two otherwise-identical sessions get
+  // the same instruction.
+  const { env } = world(t);
+  const a = composeSession(env);
+  const b = composeSession({ ...env, SOMETHING_UNRELATED: "x" });
+  const localeOf = (s: ReturnType<typeof composeSession>) =>
+    s.args.find((a) => /United States|US English/i.test(a)) ?? null;
+  assert.ok(localeOf(a), "the locale is present");
+  assert.equal(localeOf(a), localeOf(b), "and it does not vary with unrelated environment");
 });

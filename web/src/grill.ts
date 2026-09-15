@@ -143,12 +143,19 @@ export function openingPrompt(ctx: OpeningContext): string {
   const name = ctx.concept ?? "this unit";
 
   if (ctx.mode === "teach") {
+    // D9 — report #9 (`2026-09-15T05-03-24-251Z-944a3edc`): "seeing BE agent thinking here that i shouldnt be".
+    //
+    // This used to dispatch `grill-misconception` while ASKING it to explain, and that skill's rule 1 says "Do
+    // not explain. Your job is not to teach this turn." The model resolved the contradiction by improvising,
+    // and its improvisation — the working it narrates while deciding how to handle an impossible instruction —
+    // is what reached the learner. `explain-concept` is allowed to teach, so there is no contradiction to
+    // resolve and nothing to leak.
     return [
-      `/skill:grill-misconception ${name}`,
+      `/skill:explain-concept ${name}`,
       "",
       "Teach me this one first. I have not worked on it before.",
-      "Give me the smallest true mental model, one concrete example, and then ask me something that",
-      "shows whether I have it — do not interrogate me about something you have not taught me yet.",
+      "Give me the smallest true mental model and one concrete example, then ask me something that shows",
+      "whether I have it.",
     ].join(" ");
   }
 

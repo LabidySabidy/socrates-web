@@ -231,17 +231,31 @@ function derivedModules(card: {
   // happens — the JSX cannot know which half of the sentence is an identifier. `concept` stays RAW: it is
   // the grill prompt's argument and the key the tutor matches against its SCHEMA.md headings.
   //
-  // No leading verb: the row already renders the type label from `module-types.ts` ("Recite", "Review",
-  // "Explain"), so `Recite X` would say it twice. The qualifier stays on the recall exercise, because
-  // "in your own words" is what distinguishes it from a review — that is content, not the type.
+  // D10 — the row says what the ACTION IS, not the concept name again.
+  //
+  // Report #10 (`2026-09-15T05-00-46-178Z-d8d0851d`): "I dont like how the top section just repeats 'How a house
+  // lighting circuit works' it causes the string to lose their meaning and value … it's hard to tell what the
+  // difference between each of the three sections is."
+  //
+  // Measured on the real course page: the concept name appeared FIVE times in one screen — the h1, the h2, and
+  // then all three rows. Two of the three rows carried the IDENTICAL title, so the only thing distinguishing
+  // them was a small label underneath. The unit heading above already names the concept, so repeating it on
+  // every row adds nothing and hides the distinction the learner actually needs.
+  //
+  // Each row is now named for its exercise. The concept stays where it belongs — the unit heading and the
+  // group heading — and the tutor still receives the concept, because `concept` is a separate field.
   const label = humanize(concepts);
   const modules: Module[] = [
-    { id: `${slug(concepts)}/recite`, type: "recite", title: label, ...base },
-    { id: `${slug(concepts)}/review`, type: "review", title: label, due: card.due, ...base },
+    // Each title must satisfy THREE constraints, which is why the wording is what it is:
+    //   1. it must not repeat the concept name (the unit heading already carries it),
+    //   2. it must not start with its own type label, or the row stutters ("Explain Explain …"),
+    //   3. the three must be distinguishable from each other without reading the small label beneath.
+    { id: `${slug(concepts)}/recite`, type: "recite", title: "Say it from memory", ...base },
+    { id: `${slug(concepts)}/review`, type: "review", title: "Test me again", due: card.due, ...base },
     {
       id: `${slug(concepts)}/explain`,
       type: "explain",
-      title: `${label} in your own words`,
+      title: "Put it in your own words",
       ...base,
     },
   ];

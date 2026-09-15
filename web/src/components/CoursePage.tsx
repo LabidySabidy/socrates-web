@@ -17,7 +17,14 @@ import { TelemetryRail } from "./TelemetryRail.tsx";
 import { JournalPanel } from "./JournalPanel.tsx";
 
 /** Module types that run as a live tutor session. */
-const TUTOR_MODULE_TYPES = new Set(["recite", "explain", "ai-activity"]);
+// D10 — `review` was MISSING from this set, so the row rendered as an inert DIV while `grill.ts:98` already had
+// a working prompt for it. Report #10 (`2026-09-15T05-00-46-178Z-d8d0851d`): "I also dont like that Review is
+// not clickable. if it is locked then we should show a locked icon and perhaps a tooltip". The owner's read was
+// reasonable — it looks deliberate — but it was an omission, and measured side by side: Recite was an `<a>`
+// with an href and a pointer cursor, Review was a `<div>` with neither.
+//
+// `moduleAskHref` handles `recite`, `explain` AND `review`; the set is what decides whether the row opens.
+const TUTOR_MODULE_TYPES = new Set(["recite", "explain", "review", "ai-activity"]);
 
 /** Module types that open the quiz console. */
 const QUIZ_MODULE_TYPES = new Set(["quiz", "test", "course-challenge"]);
