@@ -200,13 +200,45 @@ export function collapseRepeats(sessions: SessionSummary[]): SessionSummary[] {
 }
 
 /**
+ * How close in time two records must be to count as the SAME sitting.
+ *
+ * D3's 16 duplicates were written within minutes of each other — a burst of snapshots from one sitting. Three
+ * sittings an hour apart are NOT duplicates, they are history: each has its own conversation. Without this,
+ * "same concept and same badge" collapsed a whole afternoon into one row and, because the history endpoint read
+ * the same list, made 32 turns of conversation unreachable.
+ *
+ * 10 minutes is generous for a burst and far tighter than any real break between sittings.
+ */
+const SAME_SITTING_MS = 10 * 60 * 1000;
+
+/** Whether two records belong to the same sitting, by their start times. */
+function sameSitting(a: SessionSummary, b: SessionSummary): boolean {
+  const ta = Date.parse(a.startedAt);
+  const tb = Date.parse(b.startedAt);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return true; // unknown times: fall back to content comparison
+  return Math.abs(ta - tb) <= SAME_SITTING_MS;
+}
+
+/**
  * Did two sessions record the same thing?
  *
  * Compares what a learner would read: the concepts covered and the misconception rows. Deliberately NOT the
- * file name, timestamp or byte count — those always differ, which is exactly why the 16 duplicates looked like
- * 16 distinct entries to every check that came before this one.
+ * file name or byte count — those always differ, which is why the 16 duplicates looked like 16 distinct entries
+ * to every check that came before this one. The START TIME is compared, but as a WINDOW (see `sameSitting`),
+ * because proximity in time is what makes two records the same sitting rather than two.
  */
 function sameRecord(a: SessionSummary, b: SessionSummary): boolean {
+  if (!sameSitting(a, b)) return false;
+
+  // AN OPEN SESSION IS NEVER A DUPLICATE of a closed one. A session in progress is the sitting the learner is
+  // IN; folding it away hides the row they are currently adding to.
+  if (a.open !== b.open) return false;
+
+  // THE TURN COUNT IS CONTENT, not metadata. Two records in the same minute with 2 turns and 40 turns are not
+  // the same record — one captured far more of the conversation. Ignoring this is how a collapse can hide real
+  // history, which is exactly what happened when 32 turns went missing from the restore.
+  if (a.turns !== b.turns) return false;
+
   if (a.concepts.length !== b.concepts.length) return false;
   for (let i = 0; i < a.concepts.length; i++) if (a.concepts[i] !== b.concepts[i]) return false;
 
@@ -245,9 +277,6 @@ export function readJournal(courseDir: string, opts: { limit?: number } = {}): J
 
   // newest first — the filename carries a UTC timestamp, so lexical sort is chronological
   sessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  // After the sort, so adjacency means consecutive in time. Before the limit, so a page of 20 does not become
-  // three rows by accident.
-  const collapsed = collapseRepeats(sessions);
 
   const eventsPath = join(courseDir, ".agent", "learning", "events.jsonl");
   const events = {
@@ -282,7 +311,7 @@ export function readJournal(courseDir: string, opts: { limit?: number } = {}): J
   }
 
   const limit = opts.limit ?? 50;
-  return { sessions: collapsed.slice(0, limit), events, warnings };
+  return { sessions: sessions.slice(0, limit), events, warnings };
 }
 
 /** One session's markdown, or null when the name is not a session file / does not exist. */export function readSessionMarkdown(courseDir: string, file: string): string | null {

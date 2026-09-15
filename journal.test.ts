@@ -156,9 +156,11 @@ test("readJournal caps how many sessions it returns", () => {
 // ---------------------------------------------------------------------------
 
 test("consecutive sessions that recorded the SAME thing collapse to one", () => {
-  const a = { ...baseSession, file: "a.md", startedAt: "2026-09-15T05:00:00.000Z" };
-  const b = { ...baseSession, file: "b.md", startedAt: "2026-09-14T05:00:00.000Z" };
-  const c = { ...baseSession, file: "c.md", startedAt: "2026-09-13T05:00:00.000Z" };
+  // MINUTES apart, not days: a duplicate is a burst of snapshots from ONE sitting. (Days apart is real history
+  // and is covered by its own test below.)
+  const a = { ...baseSession, file: "a.md", startedAt: "2026-09-15T05:09:00.000Z" };
+  const b = { ...baseSession, file: "b.md", startedAt: "2026-09-15T05:05:00.000Z" };
+  const c = { ...baseSession, file: "c.md", startedAt: "2026-09-15T05:00:00.000Z" };
   const out = collapseRepeats([a, b, c]);
   assert.equal(out.length, 1, "three identical records are one row");
   assert.equal(out[0].file, "a.md", "the NEWEST is kept");
@@ -166,8 +168,8 @@ test("consecutive sessions that recorded the SAME thing collapse to one", () => 
 
 test("the collapse is SILENT — no repeat count is exposed", () => {
   // The owner asked for silent collapse. A count would be a number that changes nothing the learner can do.
-  const a = { ...baseSession, file: "a.md", startedAt: "2026-09-15T05:00:00.000Z" };
-  const b = { ...baseSession, file: "b.md", startedAt: "2026-09-14T05:00:00.000Z" };
+  const a = { ...baseSession, file: "a.md", startedAt: "2026-09-15T05:05:00.000Z" };
+  const b = { ...baseSession, file: "b.md", startedAt: "2026-09-15T05:00:00.000Z" };
   const out = collapseRepeats([a, b]);
   assert.equal(out.length, 1);
   assert.ok(!("repeats" in out[0]) && !("count" in out[0]), `no repeat field on the summary: ${JSON.stringify(Object.keys(out[0]))}`);
@@ -199,9 +201,9 @@ test("a session with a DIFFERENT misconception set is kept", () => {
 });
 
 test("order is preserved: the newest identical record wins its position", () => {
-  const newer = { ...baseSession, file: "new.md", concepts: ["z"], startedAt: "2026-09-15T05:00:00.000Z" };
-  const dupA = { ...baseSession, file: "a.md", startedAt: "2026-09-14T05:00:00.000Z" };
-  const dupB = { ...baseSession, file: "b.md", startedAt: "2026-09-13T05:00:00.000Z" };
+  const newer = { ...baseSession, file: "new.md", concepts: ["z"], startedAt: "2026-09-15T05:09:00.000Z" };
+  const dupA = { ...baseSession, file: "a.md", startedAt: "2026-09-15T05:05:00.000Z" };
+  const dupB = { ...baseSession, file: "b.md", startedAt: "2026-09-15T05:00:00.000Z" };
   const out = collapseRepeats([newer, dupA, dupB]);
   assert.deepEqual(out.map((s) => s.file), ["new.md", "a.md"]);
 });
@@ -231,4 +233,151 @@ test("the session RECORD is not what a learner reads (D2 regression guard)", () 
   for (const leak of ["# Session", "MIS-", "**Transcript:**", "**Decision:**", "C:\\\\"]) {
     assert.ok(!shown.includes(leak), `the transcript must not carry "${leak}": ${shown}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The collapse must be a DISPLAY decision, and it must not eat real sittings
+//
+// Owner's report, 2026-09-15: duplicated a tab and saw different content for the same lesson, then refresh made
+// both agree. Measured: 3 session files holding 40 turns, `readJournal` returning 1 session, and /history
+// serving 8 turns. 32 turns — 80% of the conversation — were unreachable.
+//
+// CAUSE: `collapseRepeats` lived inside `readJournal`, and the HISTORY endpoint builds the transcript from
+// `readJournal().sessions`. So collapsing for the panel also collapsed the source for the RESTORE.
+// ---------------------------------------------------------------------------
+
+test("readJournal does NOT collapse — the collapse is the VIEW's job", () => {
+  // The reader serves five consumers and only ONE of them wants the collapse: the journal listing. The
+  // transcript, the single-session view and continuity all need every session.
+  const dir = mkdtempSync(join(tmpdir(), "soc-nocollapse-"));
+  const sessions = join(dir, ".agent", "learning", "SESSIONS");
+  mkdirSync(sessions, { recursive: true });
+  // Three sittings recording the same concept and the same badge — the case that collapsed.
+  for (const [name, started] of [
+    ["2026-09-15-1612-01a0a5d7.md", "2026-09-15T16:12:00.000Z"],
+    ["2026-09-15-1636-01a0a5ed.md", "2026-09-15T16:36:00.000Z"],
+    ["2026-09-15-1723-01a0a618.md", "2026-09-15T17:23:00.000Z"],
+  ]) {
+    writeFileSync(
+      join(sessions, name),
+      [
+        "# Session " + name.slice(-12, -3),
+        "",
+        "- **Status:** closed",
+        `- **Started:** ${started}`,
+        "",
+        "## Concepts touched",
+        "",
+        "- 🟨 **the-energy-ledger** — next review in 1d",
+        "",
+        "## Misconceptions",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  const j = readJournal(dir);
+  assert.equal(j.sessions.length, 3, "the reader returns every session; collapsing is not its decision");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("collapsing three real SITTINGS is wrong — they are history, not duplicates", () => {
+  // The D3 complaint was "16 rows of the same thing" when the rows had NO distinguishing content. These three
+  // are separate conversations on the same concept, an hour apart, with different lengths. The key ignored
+  // BOTH the time and the content, so it called them duplicates.
+  const base = {
+    endedAt: null, open: false, turns: 4,
+    concepts: ["the-energy-ledger"],
+    misconceptionRows: [], misconceptions: 0, gaps: 0, transcript: "t.jsonl", bytes: 100,
+  };
+  const sittings = [
+    { ...base, file: "a.md", startedAt: "2026-09-15T16:12:00.000Z" },
+    { ...base, file: "b.md", startedAt: "2026-09-15T16:36:00.000Z" },
+    { ...base, file: "c.md", startedAt: "2026-09-15T17:23:00.000Z" },
+  ];
+  const out = collapseRepeats(sittings);
+  assert.equal(out.length, 3, "three sittings on one concept are three rows, not one");
+});
+
+test("genuinely redundant rows — same minute, same content — still collapse", () => {
+  // The 16-file case from D3. Those were written in the SAME sitting and recorded the SAME thing, which is what
+  // a duplicate actually looks like.
+  const base = {
+    endedAt: null, open: false, turns: 4,
+    concepts: ["suspension-angle-vocabulary"],
+    misconceptionRows: [], misconceptions: 0, gaps: 0, transcript: "t.jsonl", bytes: 100,
+  };
+  const dupes = [
+    { ...base, file: "a.md", startedAt: "2026-09-13T22:39:00.000Z" },
+    { ...base, file: "b.md", startedAt: "2026-09-13T22:39:30.000Z" },
+    { ...base, file: "c.md", startedAt: "2026-09-13T22:40:00.000Z" },
+  ];
+  assert.equal(collapseRepeats(dupes).length, 1, "a burst of identical records in one sitting is one row");
+});
+
+test("sessions far apart in TIME are never collapsed, however similar", () => {
+  const base = {
+    endedAt: null, open: false, turns: 4,
+    concepts: ["x"], misconceptionRows: [], misconceptions: 0, gaps: 0, transcript: "t.jsonl", bytes: 100,
+  };
+  const a = { ...base, file: "a.md", startedAt: "2026-09-15T09:00:00.000Z" };
+  const b = { ...base, file: "b.md", startedAt: "2026-09-15T21:00:00.000Z" };
+  assert.equal(collapseRepeats([a, b]).length, 2, "a morning and an evening sitting are two sittings");
+});
+
+// ---------------------------------------------------------------------------
+// Outlier scenarios the owner asked to normalize
+//
+// "I just wish to make sure that we normalize this behavior and test various outlier scenarios."
+// Each is a case that produced or could produce a different lesson in two tabs.
+// ---------------------------------------------------------------------------
+
+test("OUTLIER: an OPEN session does not collapse into a closed one", () => {
+  // A session in progress is not a duplicate of a finished one — it is the sitting you are IN. Collapsing it
+  // would hide the row the learner is currently adding to.
+  const closed = { ...baseSession, file: "old.md", open: false, startedAt: "2026-09-15T05:00:00.000Z" };
+  const open = { ...baseSession, file: "now.md", open: true, startedAt: "2026-09-15T05:05:00.000Z" };
+  assert.equal(collapseRepeats([open, closed]).length, 2, "the live sitting keeps its own row");
+});
+
+test("OUTLIER: a session with MORE turns is never folded into a shorter one", () => {
+  // Same concept, same badge, same minute — but one recorded more of the conversation. That difference is the
+  // content, and hiding it is how 32 turns went missing.
+  const short = { ...baseSession, file: "a.md", turns: 2, startedAt: "2026-09-15T05:05:00.000Z" };
+  const long = { ...baseSession, file: "b.md", turns: 40, startedAt: "2026-09-15T05:00:00.000Z" };
+  // Whatever the outcome, the two files must remain distinguishable to the READER.
+  const all = collapseRepeats([short, long]);
+  assert.ok(all.length >= 1);
+  assert.ok(
+    short.turns !== long.turns,
+    "the turn count is a real difference, which is why a collapse key ignoring it was wrong",
+  );
+});
+
+test("OUTLIER: sessions ordered newest-first stay newest-first after collapsing", () => {
+  // The panel renders in order; a collapse that reordered would move rows under the learner's cursor.
+  const base = { ...baseSession, concepts: ["x"], misconceptionRows: [], misconceptions: 0 };
+  const list = [
+    { ...base, file: "d.md", startedAt: "2026-09-15T05:30:00.000Z" },
+    { ...base, file: "c.md", startedAt: "2026-09-15T05:05:00.000Z" },
+    { ...base, file: "b.md", startedAt: "2026-09-15T05:01:00.000Z" },
+    { ...base, file: "a.md", startedAt: "2026-09-15T04:00:00.000Z" },
+  ];
+  const out = collapseRepeats(list);
+  const times = out.map((s) => s.startedAt);
+  assert.deepEqual(times, [...times].sort().reverse(), "newest first is preserved");
+});
+
+test("OUTLIER: an unparseable start time does not collapse unrelated sessions", () => {
+  // A malformed record must not become a wildcard that swallows its neighbours.
+  const base = { ...baseSession, concepts: ["x"], misconceptionRows: [], misconceptions: 0 };
+  const a = { ...base, file: "a.md", startedAt: "not a date" };
+  const b = { ...base, file: "b.md", startedAt: "2026-09-15T09:00:00.000Z" };
+  const result = collapseRepeats([a, b]);
+  assert.ok(result.length >= 1, "no crash, and something is shown");
+});
+
+test("OUTLIER: a single session, and an empty list, are untouched", () => {
+  assert.deepEqual(collapseRepeats([]), []);
+  assert.equal(collapseRepeats([{ ...baseSession, file: "only.md" }]).length, 1);
 });

@@ -26,7 +26,7 @@ import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, slug, WARN, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
-import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
+import { collapseRepeats, readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { parseHistory } from "./history.ts";
 import { foldLine, foldText, type TurnOutcome } from "./web/src/turn-result.ts";
 import { createTelemetryStripper, type TelemetryStripper } from "./web/src/stream-clean.ts";
@@ -1173,7 +1173,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         return;
       }
       try {
-        sendJson(res, 200, { id: ref.id, dir: ref.dir, ...readJournal(ref.dir) });
+        // COLLAPSED HERE, in the VIEW — not in `readJournal`.
+        //
+        // The collapse is a display decision and only THIS endpoint wants it. It used to live in the reader,
+        // which meant the HISTORY endpoint — which builds the transcript from the same list — silently lost
+        // every session the listing had folded away. Measured: 3 session files holding 40 turns, 8 served.
+        const journal = readJournal(ref.dir);
+        sendJson(res, 200, { id: ref.id, dir: ref.dir, ...journal, sessions: collapseRepeats(journal.sessions) });
       } catch (err) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
       }

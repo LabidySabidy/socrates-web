@@ -1511,3 +1511,35 @@ test("matching is not defeated by the concept-name form", async (t) => {
     "a human-named concept must still match its unit, got " + JSON.stringify(body),
   );
 });
+
+// ---------------------------------------------------------------------------
+// The journal LISTING collapses; the TRANSCRIPT does not.
+//
+// Owner's report, 2026-09-15: duplicating a tab showed different content for one lesson, and refresh made both
+// agree — on the loss. Measured: 3 session files holding 40 turns, /api/history serving 8.
+// ---------------------------------------------------------------------------
+
+test("the journal listing collapses repeating sessions, and the transcript is NOT affected", async (t) => {
+  // The two endpoints read the same store and must answer differently: the listing folds duplicates for
+  // readability, the transcript keeps every sitting because that IS the conversation. Before this, the collapse
+  // lived in the reader, so folding the listing also deleted 32 turns from the restore.
+  const staticDir = mkdtempSync(join(tmpdir(), "soc-static-"));
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>ui</title>");
+  const running = await startServer({ port: 0, store: STORE, staticDir, chat: false, watch: false });
+  t.after(async () => {
+    await running.close();
+    rmSync(staticDir, { recursive: true, force: true });
+  });
+  const base = `http://127.0.0.1:${running.port}`;
+
+  const journal = await (await fetch(`${base}/api/courses/course-with-journal/journal`)).json();
+  const listing = journal.sessions.length;
+
+  // The reader is the source of truth for what EXISTS; the listing may only fold, never lose.
+  const { readJournal } = await import("./journal.ts");
+  const all = readJournal(join(FIXTURES, "course-with-journal")).sessions.length;
+
+  assert.ok(all >= 1, "precondition: sessions exist");
+  assert.ok(listing <= all, `the listing may collapse (${listing}), never invent (${all})`);
+  assert.ok(listing >= 1, "and it must still show something");
+});
