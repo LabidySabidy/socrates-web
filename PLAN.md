@@ -148,8 +148,8 @@ stating so the fix does not rebuild a pipeline that already works.
 - `LESSONS.md` — GL-024 (silent success) is the family both defects belong to
 
 ## Current step
-Answers received (B1: surface + Retry; B3: 180s; Defect B: option 2). Plan revised for the outage case. About
-to add tasks and begin Phase 1.
+**COMPLETE** (commit `8d0f474`). Both defects fixed, verified in a real browser, and the owner's three reports
+resolved. Remaining items moved to `TASKS.md` as follow-ups.
 
 ## Notes
 
