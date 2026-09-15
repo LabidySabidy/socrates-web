@@ -1543,3 +1543,92 @@ test("the journal listing collapses repeating sessions, and the transcript is NO
   assert.ok(listing <= all, `the listing may collapse (${listing}), never invent (${all})`);
   assert.ok(listing >= 1, "and it must still show something");
 });
+
+// ---------------------------------------------------------------------------
+// REJOIN — a learner who reloads mid-turn must land back in the session
+//
+// Owner, 2026-09-15: "if it's by chance still rendering for some reason, whenever they return, then they should
+// jump back into the session as if they never left. And it'll say like Socrates thinking or whatever we have it
+// saying."
+//
+// Measured cause: the server allowed exactly ONE SSE subscriber, so a reloaded tab got
+//
+//     SUBSCRIBE s6 REFUSED 429 — held by s5, settled=false
+//
+// and received nothing. The replay mechanism already existed; the single slot was the only thing blocking it.
+// ---------------------------------------------------------------------------
+
+test("REJOIN: a SECOND subscriber attaches to a running turn instead of being refused", async (t) => {
+  const { base } = await bootChatWith(t, "mock-pi-slow.mjs");
+
+  await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "start a turn", course: "course-basic" }),
+  });
+
+  // The original tab holds a stream.
+  const first = await fetch(`${base}/api/stream?course=course-basic`);
+  assert.equal(first.status, 200, "the first subscriber attaches");
+
+  // A reloaded tab subscribes while the turn is still running.
+  const second = await fetch(`${base}/api/stream?course=course-basic`);
+  assert.equal(second.status, 200, `a rejoin must NOT be refused; got ${second.status}`);
+
+  // Both must receive the turn's frames.
+  const [a, b] = await Promise.all([first.text(), second.text()]);
+  assert.ok(a.includes("data: "), "the original tab still receives frames");
+  assert.ok(b.includes("data: "), "and so does the rejoining tab");
+
+  first.body?.cancel().catch(() => {});
+  second.body?.cancel().catch(() => {});
+});
+
+test("REJOIN: a second subscriber to a DIFFERENT course is still refused — the protection is kept", async (t) => {
+  // The single-slot rule also stopped a stream delivering another course's tokens. That guarantee must survive
+  // the change; only the same-turn case should be allowed through.
+  const { base } = await bootChatWith(t, "mock-pi-slow.mjs");
+
+  await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "turn in course-basic", course: "course-basic" }),
+  });
+
+  const first = await fetch(`${base}/api/stream?course=course-basic`);
+  assert.equal(first.status, 200);
+
+  const other = await fetch(`${base}/api/stream?course=course-with-journal`);
+  assert.equal(other.status, 409, `a different course must still be refused; got ${other.status}`);
+
+  first.body?.cancel().catch(() => {});
+});
+
+test("REJOIN: a late subscriber is told a turn is in progress, and when it started", async (t) => {
+  // The owner wants the tab to say "Socrates is thinking…" rather than show an idle composer, and the elapsed
+  // clock must CARRY ON from the original send (owner's decision) rather than restart at reload.
+  const { base } = await bootChatWith(t, "mock-pi-slow.mjs");
+
+  await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "start", course: "course-basic" }),
+  });
+  await new Promise((r) => setTimeout(r, 120));
+
+  const res = await fetch(`${base}/api/stream?course=course-basic`);
+  const text = await res.text();
+  const lines = text.split(String.fromCharCode(10)).filter((l) => l.startsWith("data: ")).map((l) => l.slice(6));
+
+  const state = lines
+    .map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    })
+    .find((o) => o && o.type === "turn_state");
+  assert.ok(state, `a rejoining tab must be told the turn state; got ${JSON.stringify(lines.slice(0, 3))}`);
+  assert.equal(state.inProgress, true, "and that a turn is running");
+  assert.equal(typeof state.startedAt, "number", "with the ORIGINAL send time, for the elapsed clock");
+  assert.ok(state.startedAt <= Date.now(), "which is in the past");
+
+  res.body?.cancel().catch(() => {});
+});

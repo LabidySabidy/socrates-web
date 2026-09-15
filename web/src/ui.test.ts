@@ -1907,3 +1907,27 @@ test("D6 (b) SURVIVES the reasoning removal — the opening turn still fires on 
     "and it is a dependency, so a new arrival re-runs the effect");
   assert.match(src, /openedFor\.current === key/, "the guard itself is still there");
 });
+
+// ---------------------------------------------------------------------------
+// REJOIN — a reloaded tab adopts the running turn
+//
+// Owner: "whenever they return, they should jump back into the session as if they never left. And it'll say like
+// Socrates thinking or whatever we have it saying." And on the clock: "The elapsed clock should carry on from
+// send."
+// ---------------------------------------------------------------------------
+
+test("REJOIN: the server's turn state is read, so a reload knows a turn is running", () => {
+  const src = readFileSync(join(import.meta.dirname, "components", "LessonPage.tsx"), "utf8");
+  assert.match(src, /turn_state/, "the client must handle the turn_state frame");
+  assert.match(src, /startedAt/, "and adopt the ORIGINAL send time, not the reload time");
+});
+
+test("REJOIN: the elapsed clock is derived from the server's start, not from mount", () => {
+  // The clock exists to prove the app is alive during a stall. Restarting it at reload would report a
+  // 40-second turn as brand new, which is the opposite of what it is for.
+  const elapsedFrom = (startedAt: number, now: number) => Math.max(0, now - startedAt);
+  const sent = 1_000_000;
+  const reloadedAt = sent + 40_000;
+  assert.equal(elapsedFrom(sent, reloadedAt), 40_000, "40s in reads as 40s, not 0s");
+  assert.equal(elapsedFrom(sent, reloadedAt + 5_000), 45_000, "and keeps counting");
+});

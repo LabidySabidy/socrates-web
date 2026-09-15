@@ -18,6 +18,8 @@
  * sentence that reads perfectly well is noise. The tutor re-opens the unit on the next load anyway
  * (Step 2a), so nothing is lost by leaving it out — it is simply asked again.
  */
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 export interface HistoryTurn {
   role: "user" | "assistant";
@@ -168,4 +170,41 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
 export function tailLines(text: string, limit: number): string {
   const lines = text.split("\n");
   return lines.length <= limit ? text : lines.slice(-limit).join("\n");
+}
+
+/**
+ * The pi session file for a course, newest first.
+ *
+ * WHY THE RESTORE NEEDS THIS. `SESSIONS/*.md` is written when a session CLOSES, so a turn that is still running
+ * has no record — measured, a reload ~1s into a long turn rendered 1 block / 143 chars (the lesson intro) while
+ * 22 blocks of conversation existed. The pi JSONL is appended CONTINUOUSLY, so it is the only place an
+ * in-flight conversation can be read from.
+ *
+ * pi names the directory after the agent's cwd, with separators replaced by `-`:
+ *   `--C--Users-…-.socrates-courses-charger-heat-ledger--`
+ * so the course directory identifies it. Returns [] when nothing matches, so a course with no sessions yet is
+ * an empty history rather than an error.
+ */
+export function liveSessionFiles(piHome: string, courseDir: string): string[] {
+  const slug = courseDir.replace(/[\/:]+/g, "-").replace(/^-+|-+$/g, "");
+  const sessionsRoot = join(piHome, "sessions");
+  let dirs: string[];
+  try {
+    dirs = readdirSync(sessionsRoot);
+  } catch {
+    return [];
+  }
+  // The directory name is the cwd with separators flattened, so it CONTAINS the course slug.
+  const match = dirs.find((d) => d.includes(slug));
+  if (!match) return [];
+  const dir = join(sessionsRoot, match);
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => ({ f, m: statSync(join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.m - a.m)
+      .map((x) => join(dir, x.f));
+  } catch {
+    return [];
+  }
 }

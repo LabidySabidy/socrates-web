@@ -25,9 +25,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseLearning, type LearningData } from "./learning-parser.ts";
 import { buildCourse, slug, WARN, type CourseTree, type CourseSource } from "./course-model.ts";
 import { ProcessBridge } from "./process-bridge.ts";
-import { adoptGlobal, ensureHome, preflight } from "./session.ts";
+import { adoptGlobal, appPiHome, ensureHome, preflight } from "./session.ts";
 import { collapseRepeats, readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
-import { parseHistory } from "./history.ts";
+import { liveSessionFiles, parseHistory } from "./history.ts";
 import { foldLine, foldText, type TurnOutcome } from "./web/src/turn-result.ts";
 import { createTelemetryStripper, type TelemetryStripper } from "./web/src/stream-clean.ts";
 import { stripTelemetryFromLine } from "./stream-clean-line.ts";
@@ -235,8 +235,26 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   let noticesSent = 0;
   /** Notice frames for this turn, so a late subscriber gets them on replay like any other line. */
   let turnNotices: string[] = [];
+  /**
+   * When the CURRENT turn was accepted, for the elapsed clock.
+   *
+   * Reported to a rejoining tab so the clock CARRIES ON from the original send (owner's decision) — a reload
+   * 40 seconds into a turn must not read as a new turn that just started.
+   */
+  let turnStartedAt = 0;
   let settled = true;
-  let activeStream: ServerResponse | null = null;
+  /**
+   * EVERY live subscriber to the current turn, not one slot.
+   *
+   * A single slot meant a learner who reloaded mid-turn was REFUSED (measured: `SUBSCRIBE s6 REFUSED 429 — held
+   * by s5`) and landed on an empty console that looked like data loss. The owner: "whenever they return, they
+   * should jump back into the session as if they never left."
+   *
+   * Bounded, because a set is otherwise unbounded: one learner with a handful of tabs is the real case, and a
+   * clear refusal beats silent growth.
+   */
+  const MAX_SUBSCRIBERS = 8;
+  let liveStreams = new Set<ServerResponse>();
   /** Which course the in-flight (or most recent) turn belongs to. */
   let turnCourse: string | null = null;
   /**
@@ -331,16 +349,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       kind === "done"
         ? "data: [DONE]\n\n"
         : `data: [ERROR] ${JSON.stringify({ error: detail ?? "unknown" })}\n\n`;
-    const res = activeStream;
-    const heldBy = (res as { __hsTag?: string } | null)?.__hsTag;
-    activeStream = null;
+    const targets = [...liveStreams];
+    const heldBy = targets.map((r) => (r as { __hsTag?: string }).__hsTag ?? "?").join(",");
+    liveStreams = new Set();
     hs(
       currentTurn,
-      `SETTLE kind=${kind} alreadySettled=${wasSettled} subscriber=${heldBy ?? "NONE"} ` +
+      `SETTLE kind=${kind} alreadySettled=${wasSettled} subscribers=[${heldBy || "NONE"}] ` +
         `bufferedLines=${turnLines.length}` +
-        (res ? "" : " — [DONE] had nowhere to go"),
+        (targets.length === 0 ? " — [DONE] had nowhere to go" : ""),
     );
-    if (res) {
+    for (const res of targets) {
       try {
         res.write(signal);
         res.end();
@@ -379,8 +397,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       turnText = turnState.text;
       turnFailure = turnState.error ?? null;
       if (turnState.retrying) retryNotice = turnState.retrying;
-      const res = activeStream;
-      if (res) {
+      for (const res of liveStreams) {
         try {
           res.write(`data: ${cleanedLine}\n\n`);
         } catch {
@@ -408,9 +425,9 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           if (!notice) continue;
           const frame = "data: " + JSON.stringify({ type: "learning-notice", notice }) + String.fromCharCode(10, 10);
           turnNotices.push(frame);
-          if (activeStream) {
+          for (const res of liveStreams) {
             try {
-              activeStream.write(frame);
+              res.write(frame);
             } catch {
               /* ignore */
             }
@@ -583,7 +600,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   }
 
   function pushReload(courseId: string): void {
-    if (watchStreams.size === 0 && !activeStream) return;
+    if (watchStreams.size === 0 && liveStreams.size === 0) return;
     const result = discover();
     const ref = findCourse(result, courseId);
     const payload: Record<string, unknown> = { type: "reload", course: courseId };
@@ -602,11 +619,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         watchStreams.delete(res);
       }
     }
-    // A chat stream may also be open; it ignores frames it does not know.
-    try {
-      activeStream?.write(frame);
-    } catch {
-      /* ignore */
+    // Any chat stream may also be open; it ignores frames it does not know.
+    for (const res of liveStreams) {
+      try {
+        res.write(frame);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -1061,6 +1080,27 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
         for (const s of mine) {
           if (!existsSync(s.transcript!)) continue;
           all.push(...parseHistory(readFileSync(s.transcript!, "utf8")));
+        }
+
+        // THE SESSION THAT IS STILL RUNNING.
+        //
+        // `SESSIONS/*.md` is written when a session CLOSES, so a turn in flight has no record — measured, a
+        // reload ~1s into a long turn rendered 1 block / 143 chars (the lesson intro) while 22 blocks of
+        // conversation existed. pi's JSONL is appended CONTINUOUSLY, so it is the only place an in-flight
+        // conversation can be read from, and a learner who reloads must land back where they were.
+        //
+        // Read AFTER the closed records and skipping any whose transcript is already counted, so nothing is
+        // duplicated. `parseHistory` keeps its settled-only rule, so a half-written turn is still dropped.
+        const alreadyRead = new Set(mine.map((s) => s.transcript).filter(Boolean) as string[]);
+        for (const file of liveSessionFiles(appPiHome(), ref.dir)) {
+          if (alreadyRead.has(file) || !existsSync(file)) continue;
+          try {
+            const turns = parseHistory(readFileSync(file, "utf8"));
+            // Only if it adds something: an old, fully-recorded session would duplicate its own record.
+            if (turns.length > 0) all.push(...turns);
+          } catch {
+            /* an unreadable live file must not fail the restore */
+          }
         }
         // NO TAIL. The owner's decision on D1/D13/D14: "I want to see the full history." The previous 40-turn
         // cap silently dropped the beginning of a long conversation, and `truncated` was set but never
@@ -1562,6 +1602,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
 ${BUDAPEST_MODIFIER}` : message;
 
         turnLines = [];
+        turnStartedAt = Date.now();
         // Reset the folded outcome with the lines. Without this a failure would leak into the NEXT turn and
         // report a healthy turn as broken — the mirror of the bug being fixed.
         turnState = { text: "" };
@@ -1574,7 +1615,7 @@ ${BUDAPEST_MODIFIER}` : message;
         retryNotice = null;
         settled = false;
         currentTurn = ++turnSeq;
-        hs(currentTurn, `ACCEPT course=${ref.id} via=${killedTurn ? "switch" : "new"} priorSubscriber=${activeStream ? "held" : "none"}`);
+        hs(currentTurn, `ACCEPT course=${ref.id} via=${killedTurn ? "switch" : "new"} priorSubscriber=${liveStreams.size > 0 ? String(liveStreams.size) : "none"}`);
         turnCourse = ref.id;
         ensureBridgeWired();
         const accepted = bridge.send({ type: "prompt", message: prompt });
@@ -1618,14 +1659,24 @@ ${BUDAPEST_MODIFIER}` : message;
       }
       const tag = `s${++streamSeq}`;
       (res as { __hsTag?: string }).__hsTag = tag;
-      if (activeStream) {
-        const held = (activeStream as { __hsTag?: string }).__hsTag;
-        hs(currentTurn, `SUBSCRIBE ${tag} REFUSED 429 — held by ${held ?? "?"}, settled=${settled}`);
-        sendJson(res, 429, { error: "an SSE stream is already active" });
+      // A REJOIN IS ALLOWED. Only a DIFFERENT COURSE is refused — that was the real reason for the guard, and
+      // it is the half worth keeping. The old single-slot rule also refused the same turn, which is exactly the
+      // case a reloaded tab is (measured: `SUBSCRIBE s6 REFUSED 429 — held by s5`).
+      if (liveStreams.size >= MAX_SUBSCRIBERS) {
+        hs(currentTurn, `SUBSCRIBE ${tag} REFUSED 429 — ${liveStreams.size} subscribers, at the cap`);
+        sendJson(res, 429, { error: "too many open streams for this turn" });
         return;
       }
       hs(currentTurn, `SUBSCRIBE ${tag} accepted — settled=${settled}, replaying ${turnLines.length} line(s)`);
       res.writeHead(200, SSE_HEADERS);
+      // A rejoining tab is told the turn is IN PROGRESS, and when it STARTED.
+      //
+      // Without this the reloaded console shows an idle composer while a turn is genuinely running, and the
+      // learner has to guess. `startedAt` is the ORIGINAL send time, not the subscribe time, because the owner
+      // asked for the elapsed clock to carry on rather than restart — a 40-second turn must not read as new.
+      if (!settled) {
+        res.write(`data: ${JSON.stringify({ type: "turn_state", inProgress: true, startedAt: turnStartedAt, course: turnCourse })}\n\n`);
+      }
       for (const line of turnLines) res.write(`data: ${line}\n\n`);
       // Notices replay with the turn. A subscriber that arrives after the misconception was recorded must
       // still see the notice — it is part of the conversation, not a transient toast.
@@ -1636,15 +1687,11 @@ ${BUDAPEST_MODIFIER}` : message;
         res.end();
         return;
       }
-      activeStream = res;
-      hs(currentTurn, `ATTACH ${tag} as the live subscriber`);
+      liveStreams.add(res);
+      hs(currentTurn, `ATTACH ${tag} as a live subscriber (${liveStreams.size} attached)`);
       req.on("close", () => {
-        if (activeStream === res) {
-          activeStream = null;
-          hs(currentTurn, `CLOSE ${tag} released the subscriber slot`);
-        } else {
-          hs(currentTurn, `CLOSE ${tag} (was not the live subscriber)`);
-        }
+        const released = liveStreams.delete(res);
+        hs(currentTurn, `CLOSE ${tag} ${released ? `released (${liveStreams.size} remain)` : "(was not attached)"}`);
       });
       return;
     }

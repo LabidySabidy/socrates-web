@@ -247,6 +247,11 @@ export function LessonPage({
         setTree(t);
         setHistory(h.turns);
         setContinuity(c);
+        // REJOIN ON LOAD. A tab that reloads while a turn is running must attach to it, or it shows the
+        // restored history and then sits idle while the tutor keeps working. The server answers a subscribe
+        // with a `turn_state` frame when a turn is in progress, which is what shows "Socrates is thinking…"
+        // and carries the elapsed clock on from the original send rather than restarting it.
+        subscribeToTurn();
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));
@@ -406,6 +411,138 @@ export function LessonPage({
     onExit();
   }
 
+  /**
+   * Subscribe to the current turn's stream.
+   *
+   * LIFTED OUT OF `send()` so a RELOADING tab can also subscribe. It used to be reachable only from `send`,
+   * which meant a fresh load never opened a stream at all: measured, only ONE `ATTACH` in the server log after a
+   * mid-turn reload, so the tab showed the restored history but could not rejoin the running turn.
+   */
+  function subscribeToTurn(): void {
+  streamRef.current?.close();
+  const es = new EventSource(`/api/stream?course=${encodeURIComponent(courseId)}`);
+  streamRef.current = es;
+
+  // Accumulated SYNCHRONOUSLY in the handler, not read back from React state. A ref mirrored by an
+  // effect can still be stale when the settle frame arrives in the same burst as the last delta,
+  // which settled an empty turn and made the tutor's reply vanish.
+    let proseSoFar = "";
+  /**
+   * Streamed text is BATCHED, not applied per delta.
+   *
+   * `setTurn` on every `message_update` plus an unmemoised markdown parse is what froze the tab: measured,
+   * 6,442 updates re-parsing a 2,037-character reply 6,442 times (6.6M chars). The batcher collapses a burst
+   * into one update per interval, and `proseSoFar` still accumulates EVERY delta synchronously so nothing is
+   * lost from the settled turn.
+   */
+  const batcher = createDeltaBatcher();
+  let flushTimer: number | null = null;
+  const scheduleFlush = () => {
+    if (flushTimer !== null) return;
+    flushTimer = window.setTimeout(() => {
+      flushTimer = null;
+      const pending = batcher.drain();
+      if (pending) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: pending }));
+    }, FLUSH_INTERVAL_MS);
+  };
+
+  es.onmessage = (ev) => {
+    const raw: string = ev.data;
+    if (raw === "[DONE]") {
+      es.close();
+      if (streamRef.current === es) streamRef.current = null;
+      // Flush anything still batched BEFORE settling, so the final words are not lost to a pending timer.
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      const tail = batcher.drain();
+      if (tail) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: tail }));
+      // Settle the turn into the transcript so the next one starts clean.
+      setHistory((h) => settleAssistant(h, proseSoFar));
+      setTurn(emptyTurn());
+      setBusy(false);
+      setRetrying(null);
+      return;
+    }
+    if (raw.startsWith("[ERROR]")) {
+      setError(streamErrorText(raw));
+      es.close();
+      if (streamRef.current === es) streamRef.current = null;
+      setBusy(false);
+      return;
+    }
+    let parsed: { type?: string; assistantMessageEvent?: unknown; inProgress?: boolean; startedAt?: number } | null = null;
+    try {
+      parsed = JSON.parse(raw) as { type?: string; assistantMessageEvent?: unknown };
+    } catch {
+      return; // a non-JSON line (e.g. raw stdout) is not part of the turn
+    }
+    // A recorded misconception is shown as a notice. The server has already stripped the raw block from the
+    // stream, so this is the ONLY way the learner learns what the tutor thinks they got wrong.
+    const notice = readLearningNotice(parsed);
+    if (notice) {
+      setNotices((prev) =>
+        // De-duplicate by id+kind: a replayed stream must not stack the same notice twice.
+        prev.some((n) => n.kind === notice.kind && n.id === notice.id && n.description === notice.description)
+          ? prev
+          : [...prev, notice],
+      );
+      return;
+    }
+    if (isPassivitySignal(parsed)) {
+      // Trigger preserved: the TUTOR signals passivity, the client never diagnoses it.
+      setIntercept(true);
+      return;
+    }
+    // A retry is a TOP-LEVEL stream event, not part of `message_update` — pi emits it as its own line. An
+    // earlier version of this checked for it INSIDE the message_update branch, where it could never match.
+    if (parsed?.type === "auto_retry_start") {
+      const r = parsed as { attempt?: number; maxAttempts?: number };
+      setRetrying({
+        attempt: typeof r.attempt === "number" ? r.attempt : 1,
+        maxAttempts: typeof r.maxAttempts === "number" ? r.maxAttempts : 1,
+      });
+    }
+    if (parsed?.type === "auto_retry_end") setRetrying(null);
+
+    // REJOIN — the server says a turn is already running.
+    //
+    // A reloaded tab subscribes mid-turn and is told so, because the console would otherwise show an idle
+    // composer while the tutor is genuinely working. `startedAt` is the ORIGINAL send time so the elapsed
+    // clock CARRIES ON rather than restarting (owner's decision) — a 40-second turn must not read as new.
+    if (parsed?.type === "turn_state" && parsed.inProgress) {
+      setBusy(true);
+      if (typeof parsed.startedAt === "number" && parsed.startedAt > 0) {
+        startedAt.current = parsed.startedAt;
+      }
+      lastOutputAt.current = Date.now();
+      setElapsedMs(Math.max(0, Date.now() - startedAt.current));
+      return;
+    }
+
+    if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
+      const delta = parsed.assistantMessageEvent as { type?: string; delta?: unknown };
+      if (delta.type === "text_delta" && typeof delta.delta === "string") {
+        // Accumulated SYNCHRONOUSLY — this is what settles the turn, so it must see every delta even if the
+        // batched render lags behind.
+        proseSoFar += delta.delta;
+        batcher.push(delta.delta);
+        scheduleFlush();
+      }
+      // Any output at all — text or reasoning — restarts the silence clock, so a turn that is streaming is
+      // never called stalled however long it runs.
+      lastOutputAt.current = Date.now();
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    if (streamRef.current === es) streamRef.current = null;
+    setBusy(false);
+  };
+  }
+
   async function send(explicit?: string, origin?: ChatTurn["origin"]) {
     const message = (explicit ?? input).trim();
     if (!message || busy) return;
@@ -445,113 +582,7 @@ export function LessonPage({
       return;
     }
 
-    streamRef.current?.close();
-    const es = new EventSource(`/api/stream?course=${encodeURIComponent(courseId)}`);
-    streamRef.current = es;
-
-    // Accumulated SYNCHRONOUSLY in the handler, not read back from React state. A ref mirrored by an
-    // effect can still be stale when the settle frame arrives in the same burst as the last delta,
-    // which settled an empty turn and made the tutor's reply vanish.
-      let proseSoFar = "";
-    /**
-     * Streamed text is BATCHED, not applied per delta.
-     *
-     * `setTurn` on every `message_update` plus an unmemoised markdown parse is what froze the tab: measured,
-     * 6,442 updates re-parsing a 2,037-character reply 6,442 times (6.6M chars). The batcher collapses a burst
-     * into one update per interval, and `proseSoFar` still accumulates EVERY delta synchronously so nothing is
-     * lost from the settled turn.
-     */
-    const batcher = createDeltaBatcher();
-    let flushTimer: number | null = null;
-    const scheduleFlush = () => {
-      if (flushTimer !== null) return;
-      flushTimer = window.setTimeout(() => {
-        flushTimer = null;
-        const pending = batcher.drain();
-        if (pending) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: pending }));
-      }, FLUSH_INTERVAL_MS);
-    };
-
-    es.onmessage = (ev) => {
-      const raw: string = ev.data;
-      if (raw === "[DONE]") {
-        es.close();
-        if (streamRef.current === es) streamRef.current = null;
-        // Flush anything still batched BEFORE settling, so the final words are not lost to a pending timer.
-        if (flushTimer !== null) {
-          window.clearTimeout(flushTimer);
-          flushTimer = null;
-        }
-        const tail = batcher.drain();
-        if (tail) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: tail }));
-        // Settle the turn into the transcript so the next one starts clean.
-        setHistory((h) => settleAssistant(h, proseSoFar));
-        setTurn(emptyTurn());
-        setBusy(false);
-        setRetrying(null);
-        return;
-      }
-      if (raw.startsWith("[ERROR]")) {
-        setError(streamErrorText(raw));
-        es.close();
-        if (streamRef.current === es) streamRef.current = null;
-        setBusy(false);
-        return;
-      }
-      let parsed: { type?: string; assistantMessageEvent?: unknown } | null = null;
-      try {
-        parsed = JSON.parse(raw) as { type?: string; assistantMessageEvent?: unknown };
-      } catch {
-        return; // a non-JSON line (e.g. raw stdout) is not part of the turn
-      }
-      // A recorded misconception is shown as a notice. The server has already stripped the raw block from the
-      // stream, so this is the ONLY way the learner learns what the tutor thinks they got wrong.
-      const notice = readLearningNotice(parsed);
-      if (notice) {
-        setNotices((prev) =>
-          // De-duplicate by id+kind: a replayed stream must not stack the same notice twice.
-          prev.some((n) => n.kind === notice.kind && n.id === notice.id && n.description === notice.description)
-            ? prev
-            : [...prev, notice],
-        );
-        return;
-      }
-      if (isPassivitySignal(parsed)) {
-        // Trigger preserved: the TUTOR signals passivity, the client never diagnoses it.
-        setIntercept(true);
-        return;
-      }
-      // A retry is a TOP-LEVEL stream event, not part of `message_update` — pi emits it as its own line. An
-      // earlier version of this checked for it INSIDE the message_update branch, where it could never match.
-      if (parsed?.type === "auto_retry_start") {
-        const r = parsed as { attempt?: number; maxAttempts?: number };
-        setRetrying({
-          attempt: typeof r.attempt === "number" ? r.attempt : 1,
-          maxAttempts: typeof r.maxAttempts === "number" ? r.maxAttempts : 1,
-        });
-      }
-      if (parsed?.type === "auto_retry_end") setRetrying(null);
-
-      if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
-        const delta = parsed.assistantMessageEvent as { type?: string; delta?: unknown };
-        if (delta.type === "text_delta" && typeof delta.delta === "string") {
-          // Accumulated SYNCHRONOUSLY — this is what settles the turn, so it must see every delta even if the
-          // batched render lags behind.
-          proseSoFar += delta.delta;
-          batcher.push(delta.delta);
-          scheduleFlush();
-        }
-        // Any output at all — text or reasoning — restarts the silence clock, so a turn that is streaming is
-        // never called stalled however long it runs.
-        lastOutputAt.current = Date.now();
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      if (streamRef.current === es) streamRef.current = null;
-      setBusy(false);
-    };
+    subscribeToTurn();
   }
 
   // B3 — a course that never loaded gets a real state: a sentence a person would write, and a way back.
@@ -713,13 +744,18 @@ export function LessonPage({
             ),
           )}
 
+          {/* REJOINED IS NOT THE SAME AS BUSY-WITH-NOTHING-TO-SHOW.
+              A reloaded tab has restored history on screen AND a turn running, and the old `prose ? … : busy ?`
+              order meant the history won — so the learner saw a finished-looking conversation with no sign that
+              the tutor was still working, even though the composer was disabled. The elapsed clock is the
+              owner's chosen indicator, so it is shown whenever a turn is running. */}
+          {busy ? <p className="presence">{waitText}</p> : null}
+
           {prose ? (
             <div className="prose reading">
               <Markdown text={prose} />
             </div>
-          ) : busy ? (
-            <p className="presence">{waitText}</p>
-          ) : history.length === 0 ? (
+          ) : busy ? null : history.length === 0 ? (
             <div className="prose reading lesson-intro">
               <p>
                 This activity is a live session with the tutor. Ask a question, or explain the

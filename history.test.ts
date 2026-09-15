@@ -162,3 +162,36 @@ test("restored turns do NOT carry reasoning — it is never rendered", () => {
   assert.match(assistant.text, /Which view is camber read in/, "the prose still restores");
   assert.equal(assistant.thinking, undefined, "and the reasoning does not come with it");
 });
+
+// ---------------------------------------------------------------------------
+// The live record — a running session has no SESSIONS/*.md yet
+//
+// Measured: reloading ~1s into a long turn rendered 1 block / 143 chars (the lesson intro) while 22 blocks of
+// conversation existed. SESSIONS/*.md is written at session END, so a running turn has no record to restore
+// from. The pi JSONL is appended CONTINUOUSLY, so the restore reads it for the session still in progress.
+// ---------------------------------------------------------------------------
+
+test("a TRUNCATED final line is tolerated — now load-bearing, not incidental", () => {
+  // A hard kill mid-write leaves a half-line. Reading the LIVE file means this case happens in normal use, so
+  // it is pinned rather than left to a comment.
+  const truncated =
+    [
+      entry("user", text("q1")),
+      entry("assistant", text("a1")),
+      entry("user", text("q2")),
+      '{"type":"message","id":"abc","message":{"role":"assist',
+    ].join(String.fromCharCode(10)) + String.fromCharCode(10);
+  const turns = parseHistory(truncated);
+  assert.equal(turns.length, 2, "the complete turns survive");
+  assert.equal(turns[1].text, "a1");
+  // And the half-written turn is DROPPED rather than shown as a finished reply.
+  assert.ok(!turns.some((t) => t.text.includes("assist")), "no fragment of the partial line is rendered");
+});
+
+test("a file ending mid-STRING inside an assistant reply recovers the settled turns", () => {
+  // The realistic interruption: the model was streaming when the process died.
+  const partial = '{"type":"message","id":"z","message":{"role":"assistant","content":[{"type":"text","text":"I was say';
+  const turns = parseHistory([entry("user", text("q")), entry("assistant", text("done")), partial].join(String.fromCharCode(10)));
+  assert.equal(turns.length, 2);
+  assert.equal(turns[1].text, "done", "the finished reply is what the learner sees");
+});
