@@ -17,11 +17,11 @@ test("a settled exchange restores as a learner turn and a tutor turn", () => {
       entry("assistant", [{ type: "thinking", thinking: "they asked about camber" }, ...text("Camber is the wheels lean.")]),
     ].join("\n"),
   );
-  // `thinking` is now carried alongside the prose (D6). This fixture HAS a thinking block, so the turn
-  // restores with it — the drawer needs it, and it never appears in the conversation.
+  // `thinking` is NOT carried. The fixture has a thinking block, and the restored turn deliberately omits it:
+  // reasoning is back-end working and is never rendered (owner, 2026-09-15).
   assert.deepEqual(turns, [
     { role: "user", text: "what is camber?" },
-    { role: "assistant", text: "Camber is the wheels lean.", thinking: "they asked about camber" },
+    { role: "assistant", text: "Camber is the wheels lean." },
   ]);
 });
 
@@ -140,12 +140,14 @@ test("a long conversation is returned WHOLE, with no silent truncation", () => {
   assert.equal(turns[turns.length - 1].text, "a59");
 });
 
-test("restored turns carry their REASONING, so the drawer has something to show", () => {
-  // D6 (report #6, `…539bec85`): "no reasoning recorded this turn when I clicked out of the lesson and then
-  // back into it". The reader dropped thinking blocks, so a restored turn had none while a live one did.
+test("restored turns do NOT carry reasoning — it is never rendered", () => {
+  // REVERSES the earlier D6 fix, deliberately. That fix made restored turns carry `thinking` so the "View
+  // Socratic Reasoning" drawer had something to show. The owner has since removed the drawer:
+  // "the views are credit reasoning doesn't provide any value to the user, nor do other back end messages."
   //
-  // A turn is a USER entry followed by an assistant entry; an assistant entry alone is not a settled turn and
-  // is dropped by design, so the fixture includes the prompt.
+  // The reasoning is still WRITTEN to the session file (owner: "It's useful for debugging"). This reader stops
+  // carrying it, so nothing downstream can render it — and the D6 (b) half, the opening turn firing after a
+  // mid-turn exit, is unaffected and pinned separately in ui.test.ts.
   const turns = parseHistory(
     [
       entry("user", text("is camber the same as toe?")),
@@ -157,47 +159,6 @@ test("restored turns carry their REASONING, so the drawer has something to show"
   );
   assert.equal(turns.length, 2);
   const assistant = turns[1] as { text: string; thinking?: string };
-  assert.match(assistant.text, /Which view is camber read in/);
-  assert.match(assistant.thinking ?? "", /conflates camber with toe/, "the reasoning is carried alongside the prose");
-});
-
-test("a turn with NO reasoning restores honestly, rather than inventing one", () => {
-  const turns = parseHistory(
-    [entry("user", text("ok?")), entry("assistant", text("yes"))].join(String.fromCharCode(10)),
-  );
-  assert.equal(turns.length, 2);
-  assert.equal((turns[1] as { thinking?: string }).thinking, undefined, "absent stays absent, not an empty string");
-});
-
-test("D13/D14 — a turn the APP opened (skill dispatch) still restores, with its reply", () => {
-  // The measured cause of reports #13 and #14. The first user message in a tutor-opened lesson IS the skill
-  // dispatch, and it was filtered out of `pending` — so the tutor's reply to it had no turn to settle into and
-  // was DROPPED. On the real course the session's only user message is `<skill name="grill-misconception" …>`
-  // followed by a real assistant reply, and `parseHistory` returned zero turns for it.
-  //
-  // Reports: #13 `…d7dfdcd2` "opening back into a topic i had already started doesnt include the lessons before
-  // the question", #14 `…e9c8d721` "jumping back into an old session doesnt guaruntee the previous explainer
-  // teachings are re-displayed above the question being posed".
-  const turns = parseHistory(
-    [
-      entry("user", text('<skill name="grill-misconception" location="somewhere">')),
-      entry("assistant", text("I'll pull your state first.")),
-      entry("assistant", text("Here is what camber is, and why it matters.")),
-    ].join(String.fromCharCode(10)),
-  );
-  assert.equal(turns.length, 2, `the tutor's opening must restore, got ${JSON.stringify(turns)}`);
-  assert.equal(turns[0].role, "user");
-  assert.match(turns[1].text, /Here is what camber is/);
-});
-
-test("D13/D14 — a skill dispatch is never shown as the learner's own words", () => {
-  // The other half, and the reason the filter exists: rendering the dispatch would show the learner a slash
-  // command and scripted first-person text they never wrote (the C2 defect).
-  const turns = parseHistory(
-    [entry("user", text('<skill name="grill-misconception">teach me')), entry("assistant", text("ok"))].join(String.fromCharCode(10)),
-  );
-  for (const t of turns) {
-    assert.ok(!t.text.includes("<skill"), `the dispatch must not appear: ${t.text}`);
-    assert.ok(!t.text.includes("grill-misconception"), `nor its name: ${t.text}`);
-  }
+  assert.match(assistant.text, /Which view is camber read in/, "the prose still restores");
+  assert.equal(assistant.thinking, undefined, "and the reasoning does not come with it");
 });

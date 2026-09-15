@@ -28,7 +28,7 @@ export function JournalPanel({ courseId }: { courseId: string }) {
    */
   const [opened, setOpened] = useState<{
     file: string;
-    turns?: { role: string; text: string; thinking?: string }[];
+    turns?: { role: string; text: string }[];
     available?: boolean;
     error?: string;
   } | null>(null);

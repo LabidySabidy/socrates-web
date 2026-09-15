@@ -11,7 +11,7 @@
  * A LIVE TRACK IS ALWAYS STOPPED. Leaving one running keeps the browser's "sharing" indicator on, which is
  * alarming and pointless for a still frame.
  */
-import { paintPosition } from "./capture-position.ts";
+import { paintPosition, planPaint, shouldPaint } from "./capture-position.ts";
 
 export interface Frame {
   /** A data URL, ready to put in an `<img src>` and to post as `imageBase64`. */
@@ -194,6 +194,14 @@ export interface DomCaptureResult extends Frame {
 function isVisible(el: Element, style: CSSStyleDeclaration): boolean {
   if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
   if (el.closest(".report-sheet")) return false;
+  // THE FOCUSED SKIP LINK. Unfocused it sits at left:-9999px and the off-screen guard below excludes it.
+  // FOCUSED it moves to left:0px with a box of (0,0,125,42) and passes every check — so a keyboard user who
+  // tabbed once leaves it in exactly the state that paints "Skip to content" over the page chrome. It is a
+  // navigation aid, not part of the page being reported.
+  const box = el.getBoundingClientRect();
+  if (!shouldPaint({ cls: String(el.className ?? ""), rect: { left: box.left, top: box.top, width: box.width, height: box.height } })) {
+    return false;
+  }
   const rect = el.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return false;
   // Entirely off to the left or above: not on screen, so not in the picture.
@@ -225,7 +233,10 @@ export function captureDom(doc: Document = document, scale = 1): DomCaptureResul
   ctx.fillRect(0, 0, width, height);
 
   let painted = 0;
+  /** Inline children whose words their parent already painted, so they are not drawn a second time. */
+  const foldedInline = new Set<Element>();
   for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+    if (foldedInline.has(el)) continue;
     const style = getComputedStyle(el);
     if (!isVisible(el, style)) continue;
     const rect = el.getBoundingClientRect();
@@ -281,11 +292,36 @@ export function captureDom(doc: Document = document, scale = 1): DomCaptureResul
       .map((n) => n.textContent ?? "")
       .join("")
       .trim();
-    if (own) {
+    // INLINE CHILDREN ARE FOLDED IN, NOT PAINTED TWICE.
+    //
+    // `own` holds only TEXT_NODE children, so a paragraph paints "Ledger model holds…" as though its
+    // `<strong>Recap:</strong>` did not exist, re-flowed from its own left edge. The `<strong>` then paints
+    // "Recap:" at its own rect — exactly where that re-flow put other words. Every doubled phrase in the
+    // owner's screenshot ("Recap:", "Nothing", "Heat is the remainder line.") is this.
+    const inlineKids = Array.from(el.children).filter((c) => {
+      const d = getComputedStyle(c).display;
+      return d === "inline" || d === "inline-block";
+    });
+    const plan = planPaint({
+      parentOwnText: own,
+      parentRect: { left: x, top: y, width: rect.width, height: rect.height },
+      inlineChildren: inlineKids.map((c) => {
+        const r = c.getBoundingClientRect();
+        return { text: c.textContent ?? "", display: getComputedStyle(c).display, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+      }),
+    });
+    // `paintInlineChildren` is false when the parent folded them in. The caller loops over every element
+    // anyway, so an inline child would still be visited — mark it so the loop can skip it.
+    if (!plan.paintInlineChildren) {
+      for (const c of inlineKids) foldedInline.add(c);
+    }
+
+    const text = plan.runs[0]?.text ?? "";
+    if (text) {
       ctx.fillStyle = style.color;
       ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
       ctx.textBaseline = "top";
-      const lines = own.split(/\s+/);
+      const lines = text.split(/\s+/);
       let line = "";
       let ly = y;
       const maxWidth = rect.width || width;

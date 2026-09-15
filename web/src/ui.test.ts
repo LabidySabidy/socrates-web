@@ -323,57 +323,67 @@ test("every course in the store reaches the catalogue — there is nothing to fi
 // streaming: thinking must never reach the visible prose
 // ---------------------------------------------------------------------------
 
-test("wire thinking and prose are kept apart", () => {
+test("wire reasoning never reaches the prose", () => {
+  // The owner's instruction (2026-09-15): "Tool calls should not appear anywhere in the lesson chat … nor do
+  // other back end messages." `thinking_delta` is still ON THE WIRE and still persisted to the session file
+  // for debugging; it is simply not kept by the client.
   let t = emptyTurn();
   t = reduceTurn(t, { type: "thinking_delta", delta: "the learner assumes " });
   t = reduceTurn(t, { type: "thinking_delta", delta: "setState is sync" });
   t = reduceTurn(t, { type: "text_delta", delta: "What does the console print?" });
   const split = splitTurn(t);
-  assert.equal(split.thinking, "the learner assumes setState is sync");
   assert.equal(split.prose, "What does the console print?");
-  assert.equal(split.prose.includes("setState is sync"), false, "thinking never leaks into prose");
+  assert.equal(split.prose.includes("setState is sync"), false, "reasoning never leaks into prose");
   assert.equal(isSilent(t), false);
 });
 
-test("inline <thinking> is moved to the drawer, including across chunk boundaries", () => {
+test("inline <thinking> is REMOVED, including across chunk boundaries", () => {
+  // It used to be moved to the drawer. The drawer is gone, so it is dropped — the requirement is that it never
+  // reaches the screen, and an extracted-but-unrendered string is one render site away from being shown again.
   let t = emptyTurn();
   // the tag is split across two deltas — splitting per delta would leak "<thin" into the prose
   t = reduceTurn(t, { type: "text_delta", delta: "Before <thin" });
   t = reduceTurn(t, { type: "text_delta", delta: "king>secret</thinking> after" });
   const split = splitTurn(t);
-  assert.equal(split.thinking, "secret");
   assert.equal(split.prose, "Before  after");
   assert.equal(split.prose.includes("secret"), false);
   assert.equal(split.prose.includes("thinking>"), false);
 });
 
-test("an unterminated <thinking> block is still treated as reasoning while streaming", () => {
+test("an unterminated <thinking> block keeps everything after it off the screen", () => {
   const t = reduceTurn(emptyTurn(), { type: "text_delta", delta: "<thinking>still arriving" });
-  const split = splitTurn(t);
-  assert.equal(split.prose, "", "nothing visible yet");
-  assert.equal(split.thinking, "still arriving");
+  assert.equal(splitTurn(t).prose, "", "nothing visible yet");
   assert.equal(splitTurn(emptyTurn()).prose, "");
   assert.equal(isSilent(emptyTurn()), true);
 });
 
-test("a Thinking: line is tucked into the drawer and removed from the prose", () => {
+test("a Thinking: line is removed from the prose", () => {
   const t = reduceTurn(emptyTurn(), {
     type: "text_delta",
     delta: "Thinking: maybe they think it is synchronous\nSlope is rise over run.",
   });
   const split = splitTurn(t);
-  assert.equal(split.thinking, "maybe they think it is synchronous");
   assert.equal(split.prose, "Slope is rise over run.");
+  assert.equal(split.prose.includes("synchronous"), false, "the internal line is gone, not moved");
 });
 
-test("both sources of reasoning are combined, and unknown events are ignored", () => {
+test("reasoning from every source is dropped, and unknown events are ignored", () => {
   let t = reduceTurn(emptyTurn(), { type: "thinking_delta", delta: "wire thought" });
   t = reduceTurn(t, { type: "text_delta", delta: "<thinking>inline thought</thinking>visible" });
   t = reduceTurn(t, { type: "tool_call", delta: "ignored" });
   t = reduceTurn(t, undefined);
   const split = splitTurn(t);
-  assert.equal(split.thinking, "wire thought\n\ninline thought");
   assert.equal(split.prose, "visible");
+  assert.ok(!split.prose.includes("wire thought"), "no reasoning source leaks");
+  assert.ok(!split.prose.includes("inline thought"));
+});
+
+test("a tool-call delta never becomes prose", () => {
+  // The specific thing the owner saw: agent narration about calling a tool.
+  let t = reduceTurn(emptyTurn(), { type: "text_delta", delta: "The answer is 4." });
+  t = reduceTurn(t, { type: "toolCall_delta", delta: "Let me check today's date via bash" });
+  t = reduceTurn(t, { type: "tool_call", delta: "SM-2 table row: | Ledger | — | 1.0 | 2.5 | 0 |" });
+  assert.equal(splitTurn(t).prose, "The answer is 4.");
 });
 
 test("scroll keys are per course and unit, and absent storage is not fatal", () => {
@@ -1839,4 +1849,61 @@ test("D10 — the review row resolves to a real destination", () => {
   const href = moduleAskHref("course", 1, "review", "some concept");
   assert.ok(href, "review must produce an href now that the row opens");
   assert.match(decodeURIComponent(href), /test me/i, `the review prompt must read as a review: ${href}`);
+});
+
+// ---------------------------------------------------------------------------
+// Back-end internals must not reach the lesson (owner, 2026-09-15)
+//
+// "Tool calls should not appear anywhere in the lesson chat. So the views are credit reasoning doesn't provide
+// any value to the user, nor do other back end messages."
+//
+// TRACED FIRST, so this targets the real thing: no tool narration is in the assistant's `text` parts. The
+// strings seen in the owner's screenshot — "Let me check today's date via bash", the SM-2 table row — are
+// `thinking` parts, and the ONLY thing rendering them is the reasoning drawer.
+// ---------------------------------------------------------------------------
+
+test("no component renders `thinking` into the lesson", () => {
+  const dir = join(import.meta.dirname, "components");
+  const offenders: string[] = [];
+  // Every render site that could put reasoning on screen. Asserted against the source because the failure is
+  // "someone re-adds it", which a DOM test would only catch if it happened to render.
+  for (const f of ["LessonPage.tsx", "JournalPanel.tsx", "CoursePage.tsx"]) {
+    const src = readFileSync(join(dir, f), "utf8");
+    src.split("\n").forEach((line, i) => {
+      const code = line.split("//")[0];
+      // A JSX render of a thinking value, or the drawer that used to hold it.
+      if (/className="reasoning/.test(code)) offenders.push(`${f}:${i + 1} reasoning drawer: ${line.trim()}`);
+      if (/\{thinking\}|thinking\s*\|\||\{reasoning\}/.test(code)) {
+        offenders.push(`${f}:${i + 1} renders reasoning: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], `back-end reasoning must not be rendered:\n${offenders.join("\n")}`);
+});
+
+test("the reasoning drawer is gone from the lesson, not merely hidden", () => {
+  // Hidden would fail the spirit: the DOM would still carry the agent's working.
+  const src = readFileSync(join(import.meta.dirname, "components", "LessonPage.tsx"), "utf8");
+  assert.ok(!/View Socratic Reasoning/.test(src), "the drawer's label must be removed entirely");
+});
+
+test("the client no longer keeps a thinking bucket", () => {
+  const src = readFileSync(join(import.meta.dirname, "turn.ts"), "utf8");
+  assert.ok(
+    !/thinking_delta[\s\S]{0,80}state\.thinking/.test(src),
+    "thinking_delta must not accumulate into a rendered field",
+  );
+});
+
+test("D6 (b) SURVIVES the reasoning removal — the opening turn still fires on a new arrival", () => {
+  // This is the half of D6 that is NOT being reversed. The drawer went; the bug where the learner was "sitting
+  // there waiting for the agent to initiate the conversation" after a mid-turn exit must stay fixed.
+  //
+  // Asserted against the source, because the guard lives inside an effect and the two halves shipped in one
+  // commit — this is the check that removing the reasoning did not take the opening turn with it.
+  const src = readFileSync(join(import.meta.dirname, "components", "LessonPage.tsx"), "utf8");
+  assert.match(src, /const key = .*\$\{arrival\}/, "arrival is part of the opening-turn guard key");
+  assert.match(src, /\[continuity, tree, ask, history\.length, busy, courseId, unitNumber, arrival\]/,
+    "and it is a dependency, so a new arrival re-runs the effect");
+  assert.match(src, /openedFor\.current === key/, "the guard itself is still there");
 });

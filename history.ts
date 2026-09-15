@@ -22,15 +22,7 @@
 export interface HistoryTurn {
   role: "user" | "assistant";
   text: string;
-  /**
-   * The tutor's reasoning for this turn, when the record has it.
-   *
-   * D6 (report #6, `2026-09-15T05-07-15-660Z-539bec85`): the owner clicked into a lesson, then out, then back,
-   * and the Socratic Reasoning drawer said nothing was recorded. Live turns showed reasoning and restored ones
-   * did not, because this reader kept only `text` parts. Absent means the record genuinely had none — never
-   * an empty string, so the drawer can tell "no reasoning" from "reasoning that was empty".
-   */
-  thinking?: string;
+
   /**
    * Set when the APP opened this turn (a skill dispatch), so the UI shows it as the tutor's opening rather
    * than as the learner's own words (D13/D14, and the C2 defect it must not reintroduce).
@@ -56,17 +48,6 @@ function assistantText(content: unknown): string {
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text as string)
     .join("")
-    .trim();
-}
-
-/** The assistant's reasoning: every `thinking` part, in order. Separate from prose by design. */
-function assistantThinking(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part): part is { type?: string; thinking?: string } => typeof part === "object" && part !== null)
-    .filter((part) => part.type === "thinking" && typeof part.thinking === "string")
-    .map((part) => part.thinking as string)
-    .join(String.fromCharCode(10))
     .trim();
 }
 
@@ -105,9 +86,6 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
   const turns: HistoryTurn[] = [];
   let pending: string | null = null;
   let lastAssistant = "";
-  // The reasoning that accompanies `lastAssistant`. Tracked beside the prose, not inside it, so the drawer can
-  // show the tutor's working without it appearing in the conversation.
-  let lastThinking = "";
   /** The pending turn was opened by the APP (a skill dispatch), not typed by the learner (D13/D14). */
   let appOpened = false;
 
@@ -124,13 +102,12 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
       // speech — it carries a slash command and scripted first-person text they did not write (C2) — but the
       // turn itself is real, and dropping it lost the tutor's opening explanation.
       turns.push(appOpened ? { role: "user", text: "", origin: "app" } : { role: "user", text: pending });
-      // `thinking` is OMITTED when the record had none, rather than set to "", so the drawer can distinguish
-      // "no reasoning recorded" from "reasoning that was empty".
-      turns.push({ role: "assistant", text, ...(lastThinking.trim() ? { thinking: lastThinking.trim() } : {}) });
+      // PROSE ONLY. The reasoning is still IN the session file for debugging (owner, 2026-09-15) — this reader
+      // simply does not carry it, so there is nothing for a render site to display.
+      turns.push({ role: "assistant", text });
     }
     pending = null;
     lastAssistant = "";
-    lastThinking = "";
     appOpened = false;
   };
 
@@ -173,12 +150,7 @@ export function parseHistory(jsonl: string): HistoryTurn[] {
     }
     if (role === "assistant") {
       const text = assistantText(entry.message.content);
-      if (text) {
-        lastAssistant = text;
-        // Paired with the prose it belongs to: an assistant entry that produced text is the one whose
-        // reasoning the learner was watching.
-        lastThinking = assistantThinking(entry.message.content);
-      }
+      if (text) lastAssistant = text;
       continue;
     }
     // toolResult entries carry no prose; the assistant entry after them does.

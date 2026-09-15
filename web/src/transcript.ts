@@ -14,13 +14,7 @@ import { splitAtGate } from "./restgate.ts";
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
-  /**
-   * The tutor's reasoning for this turn, when the record has it (D6).
-   *
-   * Restored alongside the prose so the Socratic Reasoning drawer has something to show after a reload. Absent
-   * means the record genuinely had none — never an empty string, so "no reasoning recorded" stays honest.
-   */
-  thinking?: string;
+
   /**
    * Who authored a LEARNER-side turn.
    *

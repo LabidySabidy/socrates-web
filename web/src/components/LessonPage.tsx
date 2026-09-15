@@ -25,6 +25,7 @@ import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
 import { publishTranscript } from "./ReportBugPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { createDeltaBatcher, FLUSH_INTERVAL_MS } from "../stream-throttle.ts";
 import { failureView } from "../failure.ts";
 import { describeWait } from "../liveness.ts";
 
@@ -309,25 +310,10 @@ export function LessonPage({
   const outOfRange = resolution?.kind === "out-of-range" ? resolution : null;
   /** A unit number safe to print: never exponential, never fractional, never a number the course lacks. */
   const unitLabel = unit ? String(unit.n) : null;
-  const { thinking: liveThinking, prose: rawProse } = splitTurn(turn);
+  // The tutor's PROSE only. Its reasoning is back-end working: generated, persisted for debugging, and
+  // deliberately never rendered (owner, 2026-09-15).
+  const { prose: rawProse } = splitTurn(turn);
 
-  /**
-   * D6 — the reasoning the drawer shows.
-   *
-   * Live reasoning when a turn is running; otherwise the MOST RECENT settled turn's, restored from the record.
-   * The owner's report (`2026-09-15T05-07-15-660Z-539bec85`): "the socratic reasoning is saying that no
-   * reasoning recorded this turn when I clicked out of the lesson and then back into it". Restored turns now
-   * carry their `thinking` (see `history.ts`), so falling back to it is what stops a fresh load claiming the
-   * tutor recorded nothing when its working is sitting right there.
-   */
-  const thinking = (() => {
-    if (liveThinking) return liveThinking;
-    for (let i = history.length - 1; i >= 0; i--) {
-      const m = history[i];
-      if (m.role === "assistant" && m.thinking) return m.thinking;
-    }
-    return "";
-  })();
 
   /**
    * The live clock, ticking only while a turn is running.
@@ -466,13 +452,38 @@ export function LessonPage({
     // Accumulated SYNCHRONOUSLY in the handler, not read back from React state. A ref mirrored by an
     // effect can still be stale when the settle frame arrives in the same burst as the last delta,
     // which settled an empty turn and made the tutor's reply vanish.
-    let proseSoFar = "";
+      let proseSoFar = "";
+    /**
+     * Streamed text is BATCHED, not applied per delta.
+     *
+     * `setTurn` on every `message_update` plus an unmemoised markdown parse is what froze the tab: measured,
+     * 6,442 updates re-parsing a 2,037-character reply 6,442 times (6.6M chars). The batcher collapses a burst
+     * into one update per interval, and `proseSoFar` still accumulates EVERY delta synchronously so nothing is
+     * lost from the settled turn.
+     */
+    const batcher = createDeltaBatcher();
+    let flushTimer: number | null = null;
+    const scheduleFlush = () => {
+      if (flushTimer !== null) return;
+      flushTimer = window.setTimeout(() => {
+        flushTimer = null;
+        const pending = batcher.drain();
+        if (pending) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: pending }));
+      }, FLUSH_INTERVAL_MS);
+    };
 
     es.onmessage = (ev) => {
       const raw: string = ev.data;
       if (raw === "[DONE]") {
         es.close();
         if (streamRef.current === es) streamRef.current = null;
+        // Flush anything still batched BEFORE settling, so the final words are not lost to a pending timer.
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        const tail = batcher.drain();
+        if (tail) setTurn((prev) => reduceTurn(prev, { type: "text_delta", delta: tail }));
         // Settle the turn into the transcript so the next one starts clean.
         setHistory((h) => settleAssistant(h, proseSoFar));
         setTurn(emptyTurn());
@@ -524,12 +535,15 @@ export function LessonPage({
       if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
         const delta = parsed.assistantMessageEvent as { type?: string; delta?: unknown };
         if (delta.type === "text_delta" && typeof delta.delta === "string") {
+          // Accumulated SYNCHRONOUSLY — this is what settles the turn, so it must see every delta even if the
+          // batched render lags behind.
           proseSoFar += delta.delta;
+          batcher.push(delta.delta);
+          scheduleFlush();
         }
         // Any output at all — text or reasoning — restarts the silence clock, so a turn that is streaming is
         // never called stalled however long it runs.
         lastOutputAt.current = Date.now();
-        setTurn((prev) => reduceTurn(prev, parsed!.assistantMessageEvent));
       }
     };
 
@@ -668,10 +682,6 @@ export function LessonPage({
             </div>
           ) : null}
 
-          <details className="reasoning" open={thinking.length > 0}>
-            <summary>View Socratic Reasoning</summary>
-            <div className="reasoning-body">{thinking || "No reasoning recorded for this turn."}</div>
-          </details>
 
           {history.map((m, i) =>
             m.role === "user" ? (
@@ -713,8 +723,7 @@ export function LessonPage({
             <div className="prose reading lesson-intro">
               <p>
                 This activity is a live session with the tutor. Ask a question, or explain the
-                concept back in your own words — the tutor&rsquo;s reasoning appears in the drawer
-                above, and its reply here.
+                concept back in your own words — the tutor&rsquo;s reply appears here.
               </p>
             </div>
           ) : null}

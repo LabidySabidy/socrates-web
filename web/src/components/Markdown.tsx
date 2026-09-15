@@ -7,7 +7,7 @@
  *
  * HTML and SVG go to `GeneratedFrame`, which is the sandboxed tier. They are NEVER rendered inline.
  */
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { parseInline, parseMarkdown, type Block, type Inline } from "../markdown.ts";
 import { GeneratedFrame } from "./GeneratedFrame.tsx";
 
@@ -124,7 +124,12 @@ function BlockView({ block }: { block: Block }) {
 
 /** Render the tutor's text. */
 export function Markdown({ text }: { text: string }) {
-  const blocks = parseMarkdown(text);
+  // MEMOISED. This ran on every render, and a render happened on every streamed delta — so a 6,442-delta turn
+  // re-parsed the whole accumulated reply 6,442 times: measured, 6.6M characters for a 2,037-character reply,
+  // which is the quadratic that showed Chrome's "Page Unresponsive" (owner, 2026-09-15).
+  //
+  // `parseMarkdown` is pure and depends only on `text`, so the memo is exact rather than an approximation.
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
   if (blocks.length === 0) return null;
   return (
     <div className="md">
