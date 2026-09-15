@@ -575,3 +575,38 @@ instructions for the task it was asked to run.
 case back at it, or delete the dead reference and keep the grill substitution permanently. The first is a
 packaging change; the second is a one-line deletion plus a comment update. Both are cheap — the expensive
 part was believing there was a loading mechanism to debug.
+
+## T-059…T-061 — A failed tutor turn must say so, and a capture must not lie
+
+Owner's three reports, 2026-09-14: two said "socratic thinking broken" / "app stuck thinking with no reasoning
+occuring", one said "latest bug reported captures screenshot incorrectly". The tutor was never broken. Pi
+emitted `auto_retry_end {success: false, finalError: "We were unable to start processing your request within
+the 900-second timeout limit"}` **four times**, ~906s apart, and the app rendered nothing because it consumes
+only `text_delta`. The owner separately reports deepseek was **down for a few hours** — an outage, so the
+requirement is not only to report the failure but for the app to **feel alive** while it happens.
+
+Traced from pi's source (`~/.npm-global/node_modules/@earendil-works/pi-coding-agent`):
+`agent-session.js:706-714` (terminal failure), `:2018-2024` (per-retry), `:418` (`message_update` carries the
+WHOLE message, so the error is already on the wire), `settings-manager.js:555-557` (`maxRetries 3`,
+`baseDelayMs 2000`), `DEFAULT_HTTP_IDLE_TIMEOUT_MS` 900s. The arithmetic closes on the observed gaps:
+4 empty records = initial attempt + 3 retries, each idling 900s, with only 2+4+8s of backoff.
+
+- [ ] **T-059** Surface the provider failure. **Done when:** a turn whose stream carries
+  `auto_retry_end{success:false}` returns `finalError` to the client, AND a first-attempt non-retryable error
+  with NO retry events is reported too (the event is guarded by `_retryAttempt > 0`, so this path is separate
+  and is the CRITICAL risk), AND the failure renders in the chat with a **Retry** button that re-sends the
+  turn, AND raw provider text is kept for the bug report rather than shown as learner copy. Each test seen to
+  fail first.
+
+- [ ] **T-060** The app stays alive while the tutor is silent. **Done when:** elapsed time is visible from the
+  first second of a turn, and a turn producing no deltas at all reaches a distinguishable "stalled" state
+  before the **180s** ceiling — so a provider outage is legible rather than looking like an unchanging
+  spinner; AND a turn that streams normally is never labelled stalled; AND the ceiling is 180s per the owner's
+  decision. Measured in the agent browser, not asserted from source.
+
+- [ ] **T-061** The capture paints each element where it appears. **Done when:** with the page scrolled,
+  painted y equals `rect.top` (measured in a browser; today it is off by exactly the scroll offset — 0px at
+  the top, 48px scrolled), AND the scroll origin is resolved from the **nearest scrollable ancestor** because
+  the real lesson scrolls inside an inner pane while the document reports a smaller value, AND a capture of a
+  scrolled real lesson is visually correct. Owner chose **option 2 (fix positioning)** over removing the DOM
+  fallback.

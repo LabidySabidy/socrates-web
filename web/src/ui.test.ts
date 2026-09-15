@@ -1659,11 +1659,18 @@ test("no component renders a raw error string without mapping it", () => {
       // A JSX render of a bare error variable is the pattern that showed developer text.
       const jsx = line.trim();
       // A BARE interpolation of an error variable is the pattern that showed developer text. A wrapped one
-      // — `{humanMessage(error)}`, `{view.detail}` — is the fix, so it must not be flagged.
+      // — `{humanMessage(error)}`, `{view.detail}`, `{failureView(error).title}` — is the fix, so it must not
+      // be flagged. Each mapper in this list is itself tested for never emitting raw provider text
+      // (`failure.test.ts` asserts no request id, status code or provider phrasing survives).
       const bare = /^\{error\}$/.test(jsx) || /^\{opened\.error\}$/.test(jsx) || /^\{data\.error\}$/.test(jsx);
-      const inline = /<p[^>]*>\{(?!humanMessage|view\.detail)[^}]*error[^}]*\}<\/p>/.test(jsx);
+      const inline = /<p[^>]*>\{(?!humanMessage|view\.detail|failureView)[^}]*error[^}]*\}<\/p>/.test(jsx);
       const bareDetail = /^<p[^>]*>\{data\.detail\}<\/p>\s*\}?\s*:?/.test(jsx);
       if (bare || inline || bareDetail) {
+        offenders.push(`${f}:${i + 1} -> ${line.trim()}`);
+      }
+      // A mapper must not be smuggled in as a NON-mapping call: `{String(error)}` and `{error.message}` are
+      // the raw readings this guard exists to catch, and neither may pass by looking like a call.
+      if (/\{(String|JSON\.stringify)\([^)]*error/.test(jsx) || /\{error\.(message|stack|name)\}/.test(jsx)) {
         offenders.push(`${f}:${i + 1} -> ${line.trim()}`);
       }
     });

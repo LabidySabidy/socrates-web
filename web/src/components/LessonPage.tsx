@@ -20,11 +20,13 @@ import {
 import type { CourseTree, Unit } from "../types.ts";
 import { hrefCourse, hrefHome, hrefLesson } from "../router.ts";
 import { resolveUnit } from "../unit-selection.ts";
-import { courseErrorView, humanMessage, shouldFollowRename } from "../course-error.ts";
+import { courseErrorView, shouldFollowRename } from "../course-error.ts";
 import { useCourseWatch } from "../watch.ts";
 import { lessonModeOf, openingPrompt } from "../grill.ts";
 import { publishTranscript } from "./ReportBugPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { failureView } from "../failure.ts";
+import { describeWait } from "../liveness.ts";
 
 import { emptyTurn, isSilent, reduceTurn, splitTurn, streamErrorText, type TurnState } from "../turn.ts";
 import { humanize } from "../humanize.ts";
@@ -107,6 +109,17 @@ export function LessonPage({
 
 
   const streamRef = useRef<EventSource | null>(null);
+  /**
+   * The turn's clock. A frozen "thinking…" is what a four-hour provider outage looked like from the
+   * learner's side, so elapsed time is shown from the first second — a slow turn and a dead provider must
+   * not look identical.
+   */
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startedAt = useRef(0);
+  const lastOutputAt = useRef(0);
+  const [retrying, setRetrying] = useState<{ attempt: number; maxAttempts: number } | null>(null);
+  /** The last prompt, so Retry can re-send it without asking the learner to retype anything. */
+  const lastSent = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** F3 — the composer sizes itself to its content, up to the CSS cap. */
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -286,6 +299,39 @@ export function LessonPage({
   /** A unit number safe to print: never exponential, never fractional, never a number the course lacks. */
   const unitLabel = unit ? String(unit.n) : null;
   const { thinking, prose: rawProse } = splitTurn(turn);
+
+  /**
+   * The live clock, ticking only while a turn is running.
+   *
+   * 1s rather than 250ms: the text is a whole number of seconds, so a faster tick would re-render without
+   * changing a pixel — and responsiveness is a requirement here, not just correctness.
+   */
+  useEffect(() => {
+    if (!busy) {
+      setElapsedMs(0);
+      return;
+    }
+    startedAt.current = Date.now();
+    lastOutputAt.current = Date.now();
+    setElapsedMs(0);
+    const id = setInterval(() => {
+      setElapsedMs(Date.now() - startedAt.current);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [busy]);
+
+  /**
+   * What the learner reads while waiting.
+   *
+   * Silence is measured from the last OUTPUT, not the turn's start, so a turn streaming steadily for minutes
+   * is never called stalled. During a provider outage nothing arrives at all and this reaches the stalled
+   * state early — which is the whole point.
+   */
+  const waitText = describeWait({
+    elapsedMs,
+    sinceOutputMs: elapsedMs,
+    ...(retrying ? { retrying: true } : {}),
+  });
   // Everything from a gate token onward is a control signal, not content.
   const prose = rawProse; // no gate token to split on: see the note above
   const blocked = refusalReason(intercept, input) === "passive";
@@ -375,6 +421,7 @@ export function LessonPage({
       return;
     }
 
+    lastSent.current = message;
     const body = (await res.json().catch(() => ({}))) as ChatResponse;
     if (!res.ok || !body.accepted) {
       setError(body.error ?? `message rejected (HTTP ${res.status})`);
@@ -400,6 +447,7 @@ export function LessonPage({
         setHistory((h) => settleAssistant(h, proseSoFar));
         setTurn(emptyTurn());
         setBusy(false);
+        setRetrying(null);
         return;
       }
       if (raw.startsWith("[ERROR]")) {
@@ -420,11 +468,25 @@ export function LessonPage({
         setIntercept(true);
         return;
       }
+      // A retry is a TOP-LEVEL stream event, not part of `message_update` — pi emits it as its own line. An
+      // earlier version of this checked for it INSIDE the message_update branch, where it could never match.
+      if (parsed?.type === "auto_retry_start") {
+        const r = parsed as { attempt?: number; maxAttempts?: number };
+        setRetrying({
+          attempt: typeof r.attempt === "number" ? r.attempt : 1,
+          maxAttempts: typeof r.maxAttempts === "number" ? r.maxAttempts : 1,
+        });
+      }
+      if (parsed?.type === "auto_retry_end") setRetrying(null);
+
       if (parsed?.type === "message_update" && parsed.assistantMessageEvent) {
         const delta = parsed.assistantMessageEvent as { type?: string; delta?: unknown };
         if (delta.type === "text_delta" && typeof delta.delta === "string") {
           proseSoFar += delta.delta;
         }
+        // Any output at all — text or reasoning — restarts the silence clock, so a turn that is streaming is
+        // never called stalled however long it runs.
+        lastOutputAt.current = Date.now();
         setTurn((prev) => reduceTurn(prev, parsed!.assistantMessageEvent));
       }
     };
@@ -517,9 +579,24 @@ export function LessonPage({
           <h1 className="display lesson-title">{humanize(unit?.title ?? "Lesson")}</h1>
 
           {error ? (
-            <p className="notice" role="status">
-              {humanMessage(error)}
-            </p>
+            <div className="tutor-failure" role="alert">
+              <p className="tutor-failure-title">{failureView(error).title}</p>
+              <p className="tutor-failure-body">{failureView(error).body}</p>
+              {failureView(error).retryable ? (
+                // The owner's decision: surface immediately and offer a Retry. An automatic retry inside a
+                // 900s window is how 45 minutes were lost without the learner knowing.
+                <button
+                  type="button"
+                  className="tutor-failure-retry"
+                  onClick={() => {
+                    setError(null);
+                    if (lastSent.current.trim()) void send(lastSent.current);
+                  }}
+                >
+                  {failureView(error).action}
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           <details className="reasoning" open={thinking.length > 0}>
@@ -562,7 +639,7 @@ export function LessonPage({
               <Markdown text={prose} />
             </div>
           ) : busy ? (
-            <p className="presence">Socrates is thinking…</p>
+            <p className="presence">{waitText}</p>
           ) : history.length === 0 ? (
             <div className="prose reading lesson-intro">
               <p>

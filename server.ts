@@ -28,6 +28,7 @@ import { ProcessBridge } from "./process-bridge.ts";
 import { adoptGlobal, ensureHome, preflight } from "./session.ts";
 import { readJournal, readSessionMarkdown, appendEvent } from "./journal.ts";
 import { parseHistory } from "./history.ts";
+import { foldLine, foldText, type TurnOutcome } from "./web/src/turn-result.ts";
 import { buildContinuity, lessonMode } from "./continuity.ts";
 import {
   MAX_IMAGE_BYTES,
@@ -214,6 +215,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
 
   // --- chat / SSE state ------------------------------------------------------
   let turnLines: string[] = [];
+  // The turn's outcome, folded from the SAME lines that feed the stream. `turnState.retrying` is what lets
+  // the client say "retrying" instead of showing an idle spinner during a provider outage.
+  let turnState: TurnOutcome = { text: "" };
+  let turnText = "";
+  let turnFailure: string | null = null;
+  let retryNotice: { attempt: number; maxAttempts: number; reason?: string } | null = null;
   let settled = true;
   let activeStream: ServerResponse | null = null;
   /** Which course the in-flight (or most recent) turn belongs to. */
@@ -340,6 +347,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     bridge.onLine((line) => {
       if (settled) return;
       turnLines.push(line);
+      // Fold EVERY line, not just the text deltas. The failure, the retry notice and the provider's own
+      // error message all arrive on this stream and were previously discarded — which is why a failed turn
+      // was indistinguishable from a slow one. Folded for the client's benefit too: the retrying state and
+      // the elapsed clock are what make the app feel alive during a provider outage.
+      turnState = foldLine(turnState, line);
+      turnText = turnState.text;
+      turnFailure = turnState.error ?? null;
+      if (turnState.retrying) retryNotice = turnState.retrying;
       const res = activeStream;
       if (res) {
         try {
@@ -356,7 +371,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       }
       if (evt?.type === "agent_settled") {
         bridge.markIdle();
-        finalize("done");
+        // A TURN THAT PRODUCED NOTHING AND CARRIES A FAILURE IS NOT A SUCCESS.
+        //
+        // Pi reports the terminal provider failure as `auto_retry_end {success:false, finalError}` and then
+        // still settles. Finalizing "done" here is what made a four-hour deepseek outage look like an
+        // unchanging "Socrates is thinking…": the client received [DONE] with no text and nothing to show.
+        if (turnFailure && !turnText) {
+          finalize("error", turnFailure);
+        } else {
+          finalize("done");
+        }
         // Only a deferral for the course that just settled may fire; an unrelated turn must never move a
         // directory.
         flushPending(turnCourse);
@@ -590,6 +614,10 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       turnCourse = null;
 
       let text = "";
+      // `runTurn` is a one-shot generation, not a chat turn, so it folds its OWN outcome rather than sharing
+      // the live turn's state. It had the same defect: only text deltas were read, so a provider failure
+      // produced an empty string that looked like a successful generation of nothing.
+      let outcome: TurnOutcome = { text: "" };
       let finished = false;
       const finish = (result: { text: string; error?: string }) => {
         if (finished) return;
@@ -608,10 +636,17 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           return;
         }
         const inner = evt.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
-        if (evt.type === "message_update" && inner?.type === "text_delta") {
-          text += typeof inner.delta === "string" ? inner.delta : "";
-        } else if (evt.type === "agent_settled") {
-          finish({ text });
+        if (evt.type === "message_update" && inner?.type === "text_delta" && typeof inner.delta === "string") {
+          outcome = foldText(outcome, inner.delta);
+          text = outcome.text;
+          return;
+        }
+        // Everything that is not a text delta — the failure, the retry, the provider's message.
+        outcome = foldLine(outcome, line);
+        text = outcome.text;
+        if (evt.type === "agent_settled") {
+          // A generation that produced nothing AND carries a provider error did not succeed.
+          finish(outcome.error && !outcome.text ? { text, error: outcome.error } : { text });
         } else if (evt.type === "response" && evt.command === "prompt" && evt.success === false) {
           finish({ text, error: String(evt.error ?? "prompt rejected") });
         }
@@ -1430,6 +1465,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
 ${BUDAPEST_MODIFIER}` : message;
 
         turnLines = [];
+        // Reset the folded outcome with the lines. Without this a failure would leak into the NEXT turn and
+        // report a healthy turn as broken — the mirror of the bug being fixed.
+        turnState = { text: "" };
+        turnText = "";
+        turnFailure = null;
+        retryNotice = null;
         settled = false;
         currentTurn = ++turnSeq;
         hs(currentTurn, `ACCEPT course=${ref.id} via=${killedTurn ? "switch" : "new"} priorSubscriber=${activeStream ? "held" : "none"}`);

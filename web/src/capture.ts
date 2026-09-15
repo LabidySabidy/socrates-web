@@ -11,6 +11,7 @@
  * A LIVE TRACK IS ALWAYS STOPPED. Leaving one running keeps the browser's "sharing" indicator on, which is
  * alarming and pointless for a still frame.
  */
+import { paintPosition } from "./capture-position.ts";
 
 export interface Frame {
   /** A data URL, ready to put in an `<img src>` and to post as `imageBase64`. */
@@ -162,6 +163,11 @@ async function nextFrame(video: HTMLVideoElement): Promise<void> {
  * the page's background colour, then renders each VISIBLE element's text and box at its measured position.
  * That reproduces exactly the kind of defect being reported (a missing control, overlapping text, a wrong
  * label) without pretending to be a pixel-perfect renderer.
+ *
+ * POSITIONS ARE VIEWPORT-RELATIVE. `getBoundingClientRect()` already is, so no scroll offset is added per
+ * element — doing so double-counted the scroll and shifted everything by it. The scroll origin is needed, but
+ * ONCE for the canvas (`scrollOriginOf`), never per element. The owner's own layout scrolls inside an inner
+ * pane rather than the document, which is why the origin is resolved from the nearest scrollable ancestor.
  */
 export interface DomCaptureResult extends Frame {
   /** How many elements were painted, so a caller can tell an empty render from a full one. */
@@ -223,8 +229,11 @@ export function captureDom(doc: Document = document, scale = 1): DomCaptureResul
     const style = getComputedStyle(el);
     if (!isVisible(el, style)) continue;
     const rect = el.getBoundingClientRect();
-    const x = rect.left + doc.documentElement.scrollLeft;
-    const y = rect.top + doc.documentElement.scrollTop;
+    // NO scroll offset is added here. `getBoundingClientRect()` is already viewport-relative, which is the
+    // space this canvas draws in. The previous version added `scrollLeft/scrollTop` on top of that and so
+    // double-counted it: measured in a browser, a page scrolled by 48px painted every element 48px too low,
+    // which is the doubled and overlapping text in the owner's screenshots.
+    const { x, y } = paintPosition(rect);
 
     const bg = style.backgroundColor;
     if (bg && bg !== "rgba(0, 0, 0, 0)") {
