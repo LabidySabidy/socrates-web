@@ -10,6 +10,13 @@
 > folder"** (`DECISIONS.md`). Spike B's finding that `parseLearning(dir)` is directory-agnostic still
 > holds and is why a course can live in the store; the enumeration machinery built on it is gone.
 > Read `docs/CONTENT-MODEL.md` and `DECISIONS.md` for the current model.
+>
+> **The sample course has been redacted (2026-09-18).** This file was written against a real private
+> project used as a sample course. Its name and the concept ids from its learning files have been
+> removed from the tree at the owner's request, so the spike outputs below now use generic
+> placeholder ids (`concept-a` … `concept-e`). **The spike's finding is unaffected and is the part
+> that matters:** prose-matching PLAN phases against concept names recovers almost nothing, while
+> one-unit-per-concept-card works everywhere with zero invented data.
 
 ---
 
@@ -120,10 +127,10 @@ Read the roadmap with a regex, matched phase prose against concept names.
 
 ```
 phaseCount: 3    conceptCount: 5
-unit 1 "Migration & state machine"  → [moderation-state-machine]
+unit 1 "Migration & state machine"  → [concept-e]
 unit 2 "RLS"                        → []  ← nothing matched
-unit 3 "RPC + client flow"          → [client-data-flow]
-orphanConcepts: idempotent-migrations, rls-policies, security-definer-rpc
+unit 3 "RPC + client flow"          → [concept-d]
+orphanConcepts: concept-a, concept-b, concept-c
 ```
 
 **Why it failed:** there is no machine-readable link between a PLAN phase and a SCHEMA concept.
@@ -134,8 +141,7 @@ all**, so this derivation returns zero units there.
 ### Spike A2 — "Unit = concept card, 1:1" → **PROVED**
 
 ```
-units: idempotent-migrations, rls-policies, security-definer-rpc, client-data-flow,
-       moderation-state-machine
+units: concept-a, concept-b, concept-c, concept-d, concept-e
 everyUnitHasMastery: true
 ```
 
@@ -148,8 +154,8 @@ both real projects.
 `parseLearning(dir)` is already directory-agnostic. Both models work against the real dirs:
 
 ```
-scanModel:     [F:\Development\DriftScout (5 concepts), …\learning-demo (4 concepts)]
-registryModel: [F:\Development\DriftScout (5 concepts), …\learning-demo (4 concepts)]
+scanModel:     [<courses-root>/<project> (5 concepts), …/learning-demo (4 concepts)]
+registryModel: [<courses-root>/<project> (5 concepts), …/learning-demo (4 concepts)]
 ```
 
 **Constraint surfaced:** the bridge spawns `pi` with `cwd = PROJECT_DIR`. Which directory pi runs

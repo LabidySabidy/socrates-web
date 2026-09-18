@@ -5,9 +5,52 @@
 
 
 <!-- session-in-progress:start=2026-09-18T08:03:40.653Z -->
-## 2026-09-18 03:14 — Named it: `session.test.ts` — one failure, `EPERM .. _(in progress)_
-Named it: `session.test.ts` — one failure, `EPERM ... Temp\soc-session-09IWlB`. That's a temp-dir cleanup race on Windows, not a code defect. Confirming it's environmental by re-running that file alone:
+## 2026-09-18 03:28 — the sample course is off the tree
+
+Owner, 2026-09-18: *"roll back those drift scout things... that was a sample course that I had run"*,
+clarified as *"pull it down from the tree, get rid of the drift scout example"*. Redaction, not a
+history rewrite — the same choice made in `faf6933`, whose message already recorded that scrubbing
+history would need a rewrite.
+
+**Changed:** the sample course's name is gone from all 6 tracked files that carried it (26
+occurrences), plus the absolute paths that surrounded it. It was not only the name: the course's
+**concept ids** (the sample course's own concept slugs, and the spike vocabulary in
+`docs/HANDOFF-ANALYSIS.md`) are as identifying as the name, so those went too.
+
+Two deliberate non-changes, both recorded rather than silently skipped:
+
+- **~10 lowercase `drift` hits are false positives** — `badge_drift`, "so the two cannot drift",
+  "sessions drift into passive reading". English, not the course. Left alone.
+- **`server.test.ts` keeps `idempotent-migrations`** — that is an invented subject the test POSTs
+  (beside "React Internals"), with no identifying context. It happens to collide with the sample
+  course's vocabulary. Changing it would churn a passing integration test for no privacy gain.
+
+`docs/HANDOFF-ANALYSIS.md` needed care, not find-and-replace: its spike outputs are the *evidence*
+that prose-matching fails, and genericizing them without saying so would have left the document
+claiming a spike that visibly did not run. It now carries a header note stating the ids are
+placeholders and that the finding — one unit per concept card, not per PLAN phase — is unaffected.
+
+**Verified:** `git grep` for the course name, the sample concept slugs and the absolute
+courses-root path each returns **0** across every tracked file; the 40
+untouched `drift` false positives confirmed by reading each hit; `npm run gate` green.
 <!-- end-session-in-progress -->
+## 2026-09-18 03:26 — Redacted: the sample course is out of the tree
+
+Owner asked to remove a sample course (a different project of theirs, run through this app as test
+content) from the tree entirely — *"those should not be in this Socrates project at all"*. Chose
+**redaction over a history rewrite**: the name is gone from the working tree and every tracked file,
+and the 8 commits that introduced it are left as-is, consistent with `faf6933`'s earlier decision.
+
+Scope was larger than first reported. The name sat in **6 tracked files, 26 occurrences**
+(`DECISIONS.md` 4, `PROGRESS.md` 11, `TASKS.md` 2, `docs/EVENT-SCHEMA.md` 1,
+`docs/HANDOFF-ANALYSIS.md` 2, `web/src/ui.test.ts` 6), with absolute courses-root paths in three
+of them. The first scan reported "~10 in PROGRESS.md" because it was scoped to one file and used a
+count that missed most hits — the partial-detector failure again, one level up.
+
+**Verified:** every replacement confirmed by reading the output back, not by exit code; `git grep`
+for the name and the path returns 0 hits; backups of all 6 files taken to `.agent/scratch/`
+(gitignored) before editing.
+
 ## 2026-09-18 03:01 — **Changed:** no edits — investigation only
 **Changed:** no edits — investigation only. Confirmed no README exists locally or on `origin/main`; verified remote head server-side
 **Verified:** `git ls-files | grep -i readme` and `git ls-tree -r origin/main | grep -i readme` both empty; `gh api repos/.../commits/main` → `sha 84d89a0`, `committer_date 2026-09-15T18:51:47Z`; repo `pushed_at 2026-09-18T07:39:09Z` (today); `git ls-remote --heads origin` → one branch `main` @ `84d89a0` = local HEAD; `git log --oneline e288ed4..84d89a0 | wc -l`...
@@ -420,7 +463,7 @@ scan found no slug token. Tests: 134 server, 94 client.
 **Verified:** origin/main == 610f05b (0 ahead / 0 behind); canary REFUSED exit 1 then guard 50/50...
 ## 2026-09-13 16:50 — **Changed:** directive updated (adds the clean-slate/loadable-app scope, the nin...
 **Changed:** directive updated (adds the clean-slate/loadable-app scope, the nine-gate handoff intent, and Scope 6 deferral).
-**Verified:** `origin/main` = `e1ef2fc` so exactly one commit is unpushed; the guard's `.test.ts`-only condition; the four ADR line refs; the store holding only `driftscout`; nothing listening on any app port; the p16 screenshot's "2 courses".
+**Verified:** `origin/main` = `e1ef2fc` so exactly one commit is unpushed; the guard's `.test.ts`-only condition; the four ADR line refs; the store holding only `the sample course`; nothing listening on any app port; the p16 screenshot's "2 courses".
 **Next:** send it. Then run the nine gates yourself — start with loading the app and articulating a subject, since that's the p...
 ## 2026-09-13 16:30 — a course is a subject, not a folder
 
@@ -451,16 +494,16 @@ settled. Separately, the harness had a live cross-project outage — a `*.test.t
 
 ## 2026-09-13 16:31 — **Changed:** deleted codebase/citations + scan/registry/folder-picker; added one...
 **Changed:** deleted codebase/citations + scan/registry/folder-picker; added one store and the subject-first entry point; fixed hanging requests and raw-JSON errors; repaired a pi-wide startup outage in the harness
-**Verified:** 111 server + 85 client tests, typecheck, vite build; articulate flow end to end on a real agent (screenshot); default-store run with /api/fs 404 and registry actions gone; harness guard 50/50 with the new rule seen to fail; DriftScout md5s unchanged; no listeners or s...
+**Verified:** 111 server + 85 client tests, typecheck, vite build; articulate flow end to end on a real agent (screenshot); default-store run with /api/fs 404 and registry actions gone; harness guard 50/50 with the new rule seen to fail; the sample course md5s unchanged; no listeners or s...
 ## 2026-09-13 16:07 — **Changed:** nothing (direction review + directive)
 **Changed:** nothing (direction review + directive).
-**Verified:** DriftScout's course is already `kind: topic` (`/api/courses/DriftScout` returned `kind: topic, derived: true`), so dropping `codebase` doesn't touch your actual course; the scan/`COURSES_ROOT`/registry machinery is confirmed present in `courses.ts` and `server.ts`.
+**Verified:** the sample course's course is already `kind: topic` (`/api/courses/the sample course` returned `kind: topic, derived: true`), so dropping `codebase` doesn't touch your actual course; the scan/`COURSES_ROOT`/registry machinery is confirmed present in `courses.ts` and `server.ts`.
 **Next:** send it. The deletions are the bulk of the work and they make the app smaller — but note the floors in `run-extension-tests.mjs` will need lowering as tes...
 ## 2026-09-13 15:59 — Two bugs, and the second is the more serious: `findCourse`'s signature changed b...
 Two bugs, and the second is the more serious: `findCourse`'s signature changed but its callers didn't, and an unhandled throw in a route **hangs the request forever** instead of returning 500. Fixing both:
 ## 2026-09-13 15:46 — **Changed:** nothing (direction review + directive)
 **Changed:** nothing (direction review + directive).
-**Verified:** DriftScout's course is already `kind: topic` (`/api/courses/DriftScout` returned `kind: topic, derived: true`), so dropping `codebase` doesn't touch your actual course; the scan/`COURSES_ROOT`/registry machinery is confirmed present in `courses.ts` and `server.ts`.
+**Verified:** the sample course's course is already `kind: topic` (`/api/courses/the sample course` returned `kind: topic, derived: true`), so dropping `codebase` doesn't touch your actual course; the scan/`COURSES_ROOT`/registry machinery is confirmed present in `courses.ts` and `server.ts`.
 **Next:** send it. The deletions are the bulk of the work and they make the app smaller — but note the floors in `run-extension-tests.mjs` will need lowering as tes...
 ## 2026-09-13 14:58 — **Changed:** `socrates-web main` → `4be7317` (`transcript.ts`, LessonPage transc...
 **Changed:** `socrates-web main` → `4be7317` (`transcript.ts`, LessonPage transcript + synchronous settle, `theme.css` `.msg-user`, 4 tests, 2 screenshots, TASKS T-050, plan/TASKS citation fixes). `pi-agent-harness` branch `passivity-emitter` → **PR #6 open**.
@@ -516,7 +559,7 @@ all tracked and unbuilt.
 **Changed:** `socrates-web main` → `12ea537`: `assessments.ts` (`mode`, limits, `isAutoGradable`, rejection, prompt), `course-model.ts` (`- **mode:**`), `web/src/assessment-types.ts` (mode + rewritten normaliser), `quiz.ts` (`reveal`/`judge`, `check` refuses prose), `QuizPage` self-check path + the reveal fix, `docs/CONTENT-MODEL.md` (grading contract), `course-codebase` fixture gains a self-check item, 3 screenshots, TASKS/PROGRESS. Harness `LESSONS.md`: GL-024 extended, GL-025 added.
 **Veri...
 ## 2026-09-13 15:10 — Real-data run, assessment loop closed, start-a-course shipped
-**Real data:** the whole stack ran against a COPY of DriftScout's `.agent/learning` (source md5s unchanged
+**Real data:** the whole stack ran against a COPY of the sample course's `.agent/learning` (source md5s unchanged
 before and after): catalogue showed exactly 1 course with 5 units, a real pi turn streamed into the lesson and
 the extension wrote badge/SM-2/misconception through to SCHEMA.md, the tray rendered the real MIS-001, and a
 real-agent-generated quiz was taken to completion.
@@ -554,7 +597,7 @@ wrong-but-well-cited item), T-043 (no projection consumes `assessment_result` ye
 ## 2026-09-13 13:52 — **Changed:** nothing (review + reply prompt)
 **Changed:** nothing (review + reply prompt).
 **Verified:** the P5 fix is source-backed (`assessment_result` append + completion view-model tests + browser output showing `masteryLine:false`); the expr.ts server-import is confirmed in the P6 change list; the indentation bug is the third silent-parser-drop (previously `[a-z]+` and the 88-dash separator).
-**Next:** paste it. Item 1 is the one I care about most — everything to date has been verified against fixtures, and the real DriftScout cont...
+**Next:** paste it. Item 1 is the one I care about most — everything to date has been verified against fixtures, and the real the sample course cont...
 ## 2026-09-13 13:32 — **Changed:** `socrates-web main` → `58c7229` (30 paths): `assessments.ts` + 11 t...
 **Changed:** `socrates-web main` → `58c7229` (30 paths): `assessments.ts` + 11 tests, `server.ts` (assessments routes + `runTurn`), `course-model.ts` (authored quiz sections), `process-bridge.ts` (`offLine`), `web/src/quiz.ts`, `assessment-types.ts`, `QuizPage.tsx`, router/App/CoursePage wiring, 32 client tests, `test/mock-pi-assessment.mjs`, `test/fixtures/course-codebase{,-empty}/`, 4 screenshots, TASKS/PROGRESS, `.gitignore`.
 **Verified:** all raw output above; real-agent generation with r...
@@ -600,8 +643,8 @@ Added the four missing module types (`course-challenge`, `primary-source`, `faq`
 vocabulary, the manifest parser (which rejected hyphenated names), the glyph table and the labels — vocabulary
 and rendering only, no deferred screens. Separately, a course now **requires** `MISSION.md`: a directory where
 the learning extension has merely run is no longer counted as a course, because it was never initiated.
-**Verified:** with `COURSES_ROOT=F:/Development` the catalogue shows exactly 1 course (DriftScout) and
-"Scanning F:/Development"; a bare `.agent/learning` dir appears only under "Add or manage" as
+**Verified:** with `COURSES_ROOT=<courses-root>` the catalogue shows exactly 1 course (the sample course) and
+"Scanning <courses-root>"; a bare `.agent/learning` dir appears only under "Add or manage" as
 "not initiated (no MISSION.md)"; all 13 module types browser-verified rendering with icon + label.
 73 server + 13 client tests pass, `tsc --noEmit` and the build are clean.
 **Next:** P4 — bridge restart on course switch + the chat-first lesson on the real pi bridge.
@@ -626,7 +669,7 @@ caught it — that path is now gitignored alongside the other fixture runtime ar
 
 ## 2026-09-13 13:05 — **Changed:** nothing (review + reply prompt)
 **Changed:** nothing (review + reply prompt).
-**Verified:** the `[a-z]+` claim matches the parser change; the "1 course" claim I had independently confirmed earlier via live `GET /api/courses` against `F:/Development`; not-initiated exclusion is backed by the temp-root run (9 cards, 2 uninitiated).
+**Verified:** the `[a-z]+` claim matches the parser change; the "1 course" claim I had independently confirmed earlier via live `GET /api/courses` against `<courses-root>`; not-initiated exclusion is backed by the temp-root run (9 cards, 2 uninitiated).
 **Next:** paste it. P4 is where the real pi bridge finally gets wired to the UI — that's the phase I'd most want to see raw evidence for (a real streamed turn, not a mock).
 ## 2026-09-13 12:34 — **Changed:** nothing (review + reply prompt)
 **Changed:** nothing (review + reply prompt).
@@ -634,7 +677,7 @@ caught it — that path is now gitignored alongside the other fixture runtime ar
 **Next:** paste it. P3 is small, so the journal endpoint should land with it — I'd want the strip's data source visible (what it reads, what it shows) in the s...
 ## 2026-09-13 12:09 — **Changed:** `socrates-web main` → `06cee66` (34 paths: `web/` app + `web/dist` ...
 **Changed:** `socrates-web main` → `06cee66` (34 paths: `web/` app + `web/dist` gitignored, `public/` deleted, alias removed, `courses.ts` +`masteryCounts`, `server.ts` +`staticDir`, `server.test.ts`, `test/fixtures/course-duplicate-misconceptions/`, `docs/ui-shots/` ×2, PLAN/TASKS); `pi-agent-harness main` → `188eb49` (PRs #3, #4 merged); global `LESSONS.md` (GL-001 process rule).
-**Verified:** all raw output above; `npm test` 54/54; `tsc --noEmit` clean; `vite build` clean; DriftScout rever...
+**Verified:** all raw output above; `npm test` 54/54; `tsc --noEmit` clean; `vite build` clean; the sample course rever...
 ## 2026-09-13 12:20 — P2 complete: Vite + React UI on real data, cutover done
 Replaced the vanilla dashboard with `web/` (React 19 / Vite 8 / strict TS): hash router, catalogue, two-pane
 course browser, telemetry rail. Home is deliberately sparse — no streaks/levels/ep/badges/subject chips, and
@@ -684,7 +727,7 @@ tray collapsed to one row per misconception id.
 **Next:** merge #3, paste this, then P1 — where I'd want the derivation rules + `docs/CONTENT-MODEL.md` before any code.
 ## 2026-09-13 11:33 — **Changed:** `socrates-web` `main` → `faf6933` (unpublish memory + screenshots, ...
 **Changed:** `socrates-web` `main` → `faf6933` (unpublish memory + screenshots, account-name scrub, portable parser test) and `d897c0c` (T-033 limitation note); `.gitignore` (+3 rules).
-**Verified:** `git ls-files` → 16 files, none containing the account name; `git check-ignore -v` → `.gitignore:19/20/23` for the three unpublished paths; `npm test` → 9 pass / 0 fail; DriftScout mtime + artifact listing + 6-column header above; `gh pr view` → #3 `base=main`, #4 `base=p0-telemetry-durability`.
+**Verified:** `git ls-files` → 16 files, none containing the account name; `git check-ignore -v` → `.gitignore:19/20/23` for the three unpublished paths; `npm test` → 9 pass / 0 fail; the sample course mtime + artifact listing + 6-column header above; `gh pr view` → #3 `base=main`, #4 `base=p0-telemetry-durability`.
 ...
 ## 2026-09-13 11:32 — **Changed:** nothing (review + reply prompt)
 **Changed:** nothing (review + reply prompt).
@@ -754,7 +797,7 @@ per agent turn rather than per run → fixed in `a577886`); review directives 1�
 - Pushed `f634776` to `origin/main` (bundled-pi commit + docs + loc...
 **Changed:**
 - Pushed `f634776` to `origin/main` (bundled-pi commit + docs + lockfile).
-- Started socrates-web as a detached process (PID 28772) on **http://localhost:3850**, `PROJECT_DIR=<the DriftScout course dir>`.
+- Started socrates-web as a detached process (PID 28772) on **http://localhost:3850**, `PROJECT_DIR=<the the sample course course dir>`.
 
 **Verified:**
 - `/health` → `ok`
@@ -773,7 +816,7 @@ per agent turn rather than per run → fixed in `a577886`); review directives 1�
 Understood — two corrections accepted and one real gap surfaced.
 
 **Corrections locked in:**
-- `PROJECT_DIR` is required, not optional. Points at the DriftScout course dir (the dir holding `.agent/learning/`). Without it, cwd = socrates-web → `/api/learning` returns an empty structure (no error, but zero concepts/mission).
+- `PROJECT_DIR` is required, not optional. Points at the the sample course course dir (the dir holding `.agent/learning/`). Without it, cwd = socrates-web → `/api/learning` returns an empty structure (no error, but zero concepts/mission).
 - Port is 3850. The 3847 in the old log was the pre-rename "study-dashboard" build.
 
 **The pi-bundling point is the real issue.** Current state:

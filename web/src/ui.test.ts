@@ -964,20 +964,20 @@ test("the grill prompt is the mechanism, and is exactly what the original posted
 });
 
 test("a grill href round-trips its prompt", () => {
-  const href = grillHref("DriftScout", 2, "rls-policies");
-  assert.match(href, /^#\/lesson\/DriftScout\/2\?ask=/);
-  assert.equal(parseAsk(href), "/skill:grill-misconception rls-policies");
+  const href = grillHref("example-course", 2, "concept-a");
+  assert.match(href, /^#\/lesson\/example-course\/2\?ask=/);
+  assert.equal(parseAsk(href), "/skill:grill-misconception concept-a");
 });
 
 test("the ask parameter does not corrupt the unit it travels with", () => {
   // Regression guard: splitting the query late fed `1?ask=%2Fskill...` to Number(), which is NaN, which
   // silently fell back to unit 1 — the grill would have opened the wrong unit every time.
-  const route = parseHash(grillHref("DriftScout", 3, "client-data-flow"));
+  const route = parseHash(grillHref("example-course", 3, "concept-b"));
   assert.equal(route.name, "lesson");
   if (route.name !== "lesson") return;
-  assert.equal(route.courseId, "DriftScout");
+  assert.equal(route.courseId, "example-course");
   assert.equal(route.unit, 3, "the unit survives the query string");
-  assert.equal(route.ask, "/skill:grill-misconception client-data-flow");
+  assert.equal(route.ask, "/skill:grill-misconception concept-b");
 });
 
 test("a lesson without an ask is unchanged, and the other routes still parse", () => {
@@ -1208,9 +1208,9 @@ test("a renamed frame carries from and to, so an open page can follow it", () =>
 });
 
 test("a reload frame still works, and anything else is ignored rather than guessed at", () => {
-  assert.deepEqual(parseWatchFrame('{"type":"reload","course":"driftscout"}'), {
+  assert.deepEqual(parseWatchFrame('{"type":"reload","course":"example-course"}'), {
     kind: "reload",
-    course: "driftscout",
+    course: "example-course",
   });
   // A half-formed rename must not be acted on: moving a page to `undefined` is worse than staying put.
   assert.equal(parseWatchFrame('{"type":"renamed","from":"only-a-from"}').kind, "other");

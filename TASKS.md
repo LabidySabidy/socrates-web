@@ -61,7 +61,7 @@
       **Done** — removed in commit `e9000af`, the same commit that adds `learning/index.ts`. `agent/extensions/`
       now has exactly one learning entry point (`learning/`, resolved via its `index.ts`).
 - [x] **T-009** Fresh-session verification + commit in `pi-agent-harness`.
-      **Done** 2026-09-13 — run in a throwaway copy of `learning-demo`, NOT DriftScout: DriftScout's
+      **Done** 2026-09-13 — run in a throwaway copy of `learning-demo`, NOT the sample course: its
       `.agent/learning/` is untracked (`git ls-files` → empty), so a write there is unrecoverable, and badges
       drive the mastery states the derivation reads. Fresh `pi -p` processes with cwd set to the copy (GL-013).
       Deterministic: `session_start` → `session_end` in order, `SESSIONS/<date>-<time>-<id8>.md` with
@@ -185,8 +185,8 @@
       panel now shows **"Scanning <root>"** so the count is always explainable. The derivation is unchanged:
       a mission-less course still loads and still warns `no-mission` (test kept). Registry pin/order/label/hide
       unchanged.
-      **Verified** — with `COURSES_ROOT=F:/Development` the catalogue shows exactly **1** course (DriftScout,
-      5 concepts) and "Scanning F:/Development"; against a root holding the fixtures plus a bare
+      **Verified** — with `COURSES_ROOT=<courses-root>` the catalogue shows exactly **1** course (the sample
+      course, 5 concepts) and "Scanning <courses-root>"; against a root holding the fixtures plus a bare
       `.agent/learning` directory, the catalogue shows 9 of 11 refs and "Not initiated (no MISSION.md) · 2"
       lists `bare-project` and `course-no-mission`.
 - [x] **T-024** "Add course" form → `POST /api/courses`; hide/ignore affordances; no-results state.

@@ -54,8 +54,8 @@ anchored to a repository and no generated item is grounded in a real file. The s
 stated once, in `MISSION.md`, and the store is `~/.socrates/courses/<slug>/`.
 
 **Context:** The handoff's catalogue is subject-based (Algebra, Biology), but the only real learning
-missions on this machine are anchored to a codebase — `DriftScout`'s mission is "build an admin post
-authorization system into DriftScout". The user explicitly wants to ask about a codebase rather than a
+missions on this machine are anchored to a codebase — the sample course's mission is "build an admin post
+authorization system into `<project>`". The user explicitly wants to ask about a codebase rather than a
 subject. This also resolves an open question from the handoff analysis: nothing on disk authors quizzes,
 hints, or interactives, so screens D and E had no content source.
 
@@ -105,7 +105,7 @@ existing projects break) — rejected. Derive units from PLAN phases (spike-disp
 quizzes interleaved between groups) — that requires a `COURSE.md`, which is exactly the escape hatch. The
 derivation must stay small and documented so it cannot drift into heuristics.
 
-**Downstream constraint:** `DriftScout` must render immediately with zero new files, as the derivation's
+**Downstream constraint:** the sample course must render immediately with zero new files, as the derivation's
 regression fixture. It is a rendering fixture, not a course to continue (its session backfill was scrapped).
 
 ## 2026-09-13 — Add-a-course: scan-first, registry overlay, API/UI path
@@ -380,7 +380,7 @@ for removal. Migrating course directories in place — rejected; a single store 
 
 **Tradeoffs:** Courses no longer live beside the code they might be about, and a learner cannot point at
 an existing project. In exchange there is one storage model, one entry point, and no filesystem browsing
-in the API. DriftScout's `.agent/learning` is migrated in as a one-time copy.
+in the API. The sample course's `.agent/learning` is migrated in as a one-time copy.
 
 ## 2026-09-13 — Known gap: the app depends on the developer's local harness (deferred)
 

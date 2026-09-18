@@ -144,7 +144,7 @@ Any repo hosting a course — especially a public one — must ignore the runtim
 
 The source-of-truth files are path-free and safe to commit: `MISSION.md`, `PLAN.md`, `SCHEMA.md`.
 
-**Applied:** `DriftScout` (public repo). It previously ignored only `.agent/telemetry*`, so `events.jsonl`
+**Applied:** a sample course repo (public, name redacted). It previously ignored only `.agent/telemetry*`, so `events.jsonl`
 and `SESSIONS/` — the two files that carry the account name in every `session_file` — were one `git add .`
 away from publication. Verified after the fix: all three artifacts ignored, and `MISSION.md` / `PLAN.md` /
 `SCHEMA.md` still committable. Nothing was published, so no history rewrite was needed.
