@@ -16,9 +16,14 @@ Thumbs.db
 # Runtime logs (generated)
 server*.log
 
-# Personal memory (not shipped) — mirrors the pi-agent-harness rule
-PROGRESS.md
-LESSONS.md
+# Personal memory — now published deliberately (owner's decision, 2026-09-18).
+# Scanned for OS usernames / absolute paths / secrets before un-ignoring: PROGRESS.md
+# and LESSONS.md contain no username and no secrets, and use `~/.socrates/...` rather
+# than machine-specific paths. If either file gains an absolute path, re-check before
+# committing — they are public.
+# NOTE: runtime logs are the thing that must stay ignored (`.agent/`, see GL-019).
+# PROGRESS.md
+# LESSONS.md
 
 # Design handoff reference (not shipped; PLAN.md still references it locally)
 docs/handoff-shots/
